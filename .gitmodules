@@ -1,3 +1,6 @@
 [submodule "External/gptoolbox"]
 	path = External/gptoolbox
 	url = https://github.com/alecjacobson/gptoolbox.git
+[submodule "External/BrewerMap"]
+	path = External/BrewerMap
+	url = https://github.com/DrosteEffect/BrewerMap.git
