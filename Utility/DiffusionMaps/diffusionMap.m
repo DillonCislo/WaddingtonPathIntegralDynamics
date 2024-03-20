@@ -1,0 +1,183 @@
+function [diffMap, lambda, V, MB, DAlpha] = diffusionMap(K, mapOptions)
+%DIFFUSIONMAP Calculates a diffusion map by embedding D-dimensional data
+%into a Euclidean vector space where Euclidean distance approximates
+%'diffusion' distance on the high-dimensional manifold
+%
+%   INPUT OPTIONS:
+%
+%       - K:        #Px#P affinity matrix
+%
+%   OPTIONAL INPUTS (Name, Value)-Pairs:
+%
+%       -
+%
+%   OUTPUT PARAMETERS:
+%
+%       - diffMap
+%
+%       - lambda
+%
+%       - MB:           Backwards operator 
+%
+%   by Dillon Cislo 12/10/2022
+
+%--------------------------------------------------------------------------
+% INPUT PROCESSING
+%--------------------------------------------------------------------------
+validateattributes(K, {'numeric'}, {'2d', 'finite', 'real'});
+assert(issymmetric(K), 'Input affinity matrix must be symmetric');
+
+if (nargin < 2), mapOptions = struct(); end
+assert(isstruct(mapOptions), ...
+    'Input options must be supplied as a struct');
+oldFieldNames = fieldnames(mapOptions);
+newFieldNames = lower(oldFieldNames);
+for i = 1:numel(oldFieldNames)
+    mapOptions = renameStructField(mapOptions, ...
+        oldFieldNames{i}, newFieldNames{i});
+end
+
+if isfield(mapOptions, 'verbose')
+    verbose = mapOptions.verbose;
+    validateattributes(verbose, {'logical'}, {'scalar'});
+    mapOptions = rmfield(mapOptions, 'verbose');
+else
+    verbose = false;
+end
+
+if isfield(mapOptions, 'alpha')
+    alpha = mapOptions.alpha;
+    validateattributes(alpha, {'numeric'}, ...
+        {'scalar', 'finite', 'positive', 'real'});
+    mapOptions = rmfield(mapOptions, 'alpha');
+    alphaSupplied = true;
+else
+    alpha = 0;
+    alphaSupplied = false;
+end
+
+if isfield(mapOptions, 'normalization')
+    normType = lower(mapOptions.normalization);
+    assert(ismember(normType, ...
+        {'markov', 'fokkerplanck', 'laplacebeltrami'}));
+    mapOptions = rmfield(mapOptions, 'normalization');
+else
+    normType = [];
+end
+
+if (~isempty(normType) && alphaSupplied && verbose)
+    warning(['Overriding input alpha value with standard ' ...
+        'normalization type: ' normType]);
+end
+
+switch normType
+    case 'markov'
+        alpha = 0;
+    case 'laplacebeltrami'
+        alpha = 1; 
+    case 'fokkerplanck'
+        alpha = 1/2;
+end
+
+if isfield(mapOptions, 't')
+    t = mapOptions.t;
+    validateattributes(t, {'numeric'}, ...
+        {'scalar', 'finite', 'positive', 'real'});
+    mapOptions = rmfield(mapOptions, 't');
+else
+    t = 1;
+end
+
+if isfield(mapOptions, 'numvectors')
+    numEigs = mapOptions.numvectors;
+    validateattributes(numEigs, {'numeric'}, ...
+        {'scalar', 'integer', 'finite', 'real'});
+    mapOptions = rmfield(mapOptions, 'numvectors');
+else
+    numEigs = 4;
+end
+
+if isfield(mapOptions, 'symmetrizelaplacian')
+    symmetrizeLaplacian = mapOptions.symmetrizelaplacian;
+    validateattributes(symmetrizeLaplacian, {'logical'}, {'scalar'});
+    mapOptions = rmfield(mapOptions, 'symmetrizelaplacian');
+else
+    symmetrizeLaplacian = true;
+end
+
+if isfield(mapOptions, 'normalizedensity')
+    normalizeDensity = mapOptions.normalizedensity;
+    validateattributes(normalizeDensity, {'logical'}, {'scalar'});
+    mapOptions = rmfield(mapOptions, 'normalizedensity');
+else
+    normalizeDensity = true;
+end
+
+assert(isempty(fieldnames(mapOptions)), 'Invalid option type supplied');
+
+%--------------------------------------------------------------------------
+% GENERATE DIFFUSION MAP
+%--------------------------------------------------------------------------
+
+% Graph normalization constant (just sum of affinities for each data point)
+D = sum(K,2) + eps;
+
+% K^{(\alpha)} = D^{-\alpha} * K * D^{-\alpha}
+if (alpha > 0)
+    
+    invDAlpha = spdiags( 1 ./ (D.^alpha), 0, size(K,1), size(K,2) );
+    KAlpha = invDAlpha * K * invDAlpha;
+    
+    % K^{(\alpha)} is symmetric by construction for symmetric K, but
+    % numerical error sometimes destroys the symmetry by small amount
+    if issymmetric(K), KAlpha = (KAlpha + KAlpha.')/2; end
+
+else
+    
+    KAlpha = K;
+    
+end
+
+% Perform density normalization step by setting diagonal elements of
+% re-normalized affinity matrix equal to zero
+if normalizeDensity, KAlpha = KAlpha - diag(diag(KAlpha)); end
+
+% M = (D^{(\alpha)})^{-1} * K^{(\alpha)}
+DAlpha = sum(KAlpha, 2);
+MB = spdiags( 1./ DAlpha, 0, size(K,1), size(K,2) ) * KAlpha;    
+
+if symmetrizeLaplacian, MB = (MB + MB.')/2; end
+
+% Caluclate eigenvalues/eigenvectors
+% NOTE: Eigenvector output of both methods are normalized to 1
+if numEigs > 0
+    
+    if (size(MB,1) > 1000) % issparse(MB)
+        
+        [V, lambda] = eigs(MB, numEigs, 'largestabs');
+        lambda = diag(lambda);
+        
+    else
+        
+        % 'eig' doesn't return the values sorted
+        [V, lambda] = eig(MB);
+        [lambda, sortIDx] = sort(diag(lambda),'descend');
+        lambda = lambda(1:numEigs);
+        V = V(:,sortIDx(1:numEigs));
+        
+    end
+    
+    % Calculate diffusion map coordinates
+    diffMap = repmat((lambda.').^t, size(V,1), 1) .* V;
+    diffMap = diffMap(:, 2:end);
+    
+else
+    
+    diffMap = [];
+    lambda = [];
+    V = [];
+    
+end
+
+end
+
