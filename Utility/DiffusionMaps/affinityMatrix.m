@@ -8,21 +8,30 @@ function [K, nnDists, nnIDx] = affinityMatrix(X, affinityOptions)
 %
 %   OPTIONAL INPUTS (Name, Value)-Pairs:
 %
-%       - ('DistanceType', 'euclidean'): The metric used to calculate the
-%       raw pair-wise distances between data points. See documentation for
-%       'pdist2'.
+%       - ('DistanceType', distType = 'euclidean'): The metric used to
+%       calculate the raw pair-wise distances between data points. See
+%       documentation for 'knnsearch'.
 %
-%       - ('NumNeighbors', '10'): The number of neareast neigbors retained
-%       in the affinity matrix computation. Higher numbers of neighbors
-%       will result in a denser affinity matrix.
+%       - ('NumNeighbors', kNN = '10'): The number of neareast neigbors
+%       retained in the affinity matrix computation. Higher numbers of
+%       neighbors will result in a denser affinity matrix.
 %
-%       - ('SelfTune', 0): The Kth neighbor used to calculate a local
-%       scaling measure that sets the width of the affinity matrix kernel.
-%       See 'Self-Tuning Spectral Clustering' by Zelnik-Manor and Perona
-%       (2004). The authors in that paper use selfTune = 7.
+%       - ('SelfTune', selfTune = 0): The Kth neighbor used to calculate a
+%       local scaling measure that sets the width of the affinity matrix
+%       kernel. See 'Self-Tuning Spectral Clustering' by Zelnik-Manor and
+%       Perona (2004). The authors in that paper use selfTune = 7.
 %
-%       - ('Verbose', false): Report the elapsed time for the pairwise
-%       distance calculation
+%       - ('Sigma', sigma = -1): The bandwidth of the affinity matrix
+%       kernel. Any value less than 0 results in an automatic estimate of
+%       the bandwidth based on the distribution of nearest neighbor
+%       distances. This property is ignored if self-tuning is enabled.
+%       NOTE: The Gaussian kernel depends on sigma as
+%       ~exp(-vals.^2 / (4*sigma)), which matches the convention in the
+%       diffusion map literature, but differs from the usual normal
+%       distribution convention.
+%
+%       - ('Verbose', verbose = false): Report the elapsed time for the
+%       pairwise distance calculation
 %
 %   OUTPUT PARAMETERS:
 %
