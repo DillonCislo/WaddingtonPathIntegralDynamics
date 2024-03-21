@@ -37,11 +37,12 @@ else
         '>=', 0, '<=' 1});
 end
 
-%
 if ~iscell(vals)
+    
     if ~exist('crange','var') || isempty(crange)
         crange = [min(vals) max(vals)];
     end
+    
     % Generate the colormap
     % cmap = eval([colormap '(256)']);
     % Normalize the values to be between 1 and 256
@@ -52,13 +53,17 @@ if ~iscell(vals)
     valsN(isnan(valsN)) = 1;
     % Convert the normalized values to the RGB values of the colormap
     rgb = cmap(valsN, :);
+    
 elseif iscell(vals)
+    
     if ~exist('crange','var') || isempty(crange)
         crange = [min(vertcat(vals{:})) max(vertcat(vals{:}))];
     end
+    
     % Generate the colormap
     % cmap = eval([colormap '(256)']);
     rgb = cell(1, length(vals));
+    
     for ii = 1:length(vals)
         % Normalize the values to be between 1 and 256 for cell ii
         valsN = vals{ii};
@@ -70,5 +75,7 @@ elseif iscell(vals)
         % Convert the normalized values to the RGB values of the colormap
         rgb{ii} = cmap(valsN, :);
     end
+    
 end
+
 return
