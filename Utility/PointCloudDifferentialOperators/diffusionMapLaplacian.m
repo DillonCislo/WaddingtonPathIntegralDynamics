@@ -1,0 +1,90 @@
+function [L, M] = diffusionMapLaplacian(X, sigma, kNN, symmetrizeLaplacian)
+%DIFFUSIONMAPLAPLACIAN Construct a point cloud Laplace-Beltrami operator
+%based on a diffusion map algorithm. For any manifold with a boundary, the
+%Laplace-Beltrami operator needs to be interpreted as acting with Neumann
+%boundary conditions. See "Geometric diffusions as a tool for harmonic
+%analysis and structure definition of data: Diffusion Maps" by Coifman,
+%Lafon, et al. (2005) for more details.  NOTE: We allow the user to set the
+%numberof nearest neighbors retained in the affinity matrix computation,
+%but suggest using a fully connected graph to avoid subtle issues in
+%asymptotic convergence.
+%
+%   INPUT PARAMETERS:
+%
+%       - X:                    #N x dim set of input points
+%
+%       - sigma:                Bandwidth of the affinity matrix kernel
+%
+%       - kNN:                  The number of nearest neighbors retained in
+%                               the affinity matrix computation
+%
+%       - symmetrizeLaplacian:  Whether or not to symmetrize the
+%                               Laplace-Beltrami operator. Typically this
+%                               results in worse performance, so use at
+%                               your own risk
+%                       
+%
+%   OUTPUT PARAMETERS:
+%
+%       - L:        #N x #N (positive-definite) Laplace-Beltrami
+%                   operator
+%
+%       - M:        #N x #N diagonal mass matrix
+%
+%   by Dillon Cislo 2024/03/21
+
+%--------------------------------------------------------------------------
+% INPUT PROCESSING
+%--------------------------------------------------------------------------
+% NOTE: More input checks are performed in the diffusion map functions
+
+validateattributes(X, {'numeric'}, {'2d', 'finite', 'real'});
+numPoints = size(X,1); % dims = size(X,2);
+
+if (nargin < 2), sigma = -1; end
+validateattributes(sigma, {'numeric'}, {'scalar', 'finite', 'real'});
+
+if (nargin < 3), kNN = numPoints; end
+validateattributes(kNN, {'numeric'}, ...
+    {'scalar', 'integer', 'finite', 'real'});
+if (kNN <= 0), kNN = numPoints; end
+
+if (nargin < 4), symmetrizeLaplacian = false; end
+validateattributes(symmetrizeLaplacian, {'logical'}, {'scalar'});
+
+%--------------------------------------------------------------------------
+% COMPUTE LAPLACIAN
+%--------------------------------------------------------------------------
+
+% Compute affinity matrix
+affinityOptions = struct();
+affinityOptions.Sigma = sigma;
+affinityOptions.NumNeighbors = kNN;
+affinityOptions.Verbose = false;
+
+[K, ~, ~] = affinityMatrix(X, affinityOptions);
+
+% Compute transition probability matrix corresponding to the
+% Laplace-Beltrami operator on input point set
+mapOptions = struct();
+mapOptions.Normalization = 'LaplaceBeltrami';
+mapOptions.NumVectors = 0;
+mapOptions.Verbose = false;
+mapOptions.SymmetrizeLaplacian = symmetrizeLaplacian;
+
+[~, ~, ~, LT, DAlpha] = diffusionMap(K, mapOptions);
+
+% Convert diffusion map output into Laplace-Beltrami operator
+L = (LT - speye(size(LT))) ./ sigma;
+
+% Generate the mass matrix
+M = spdiags(DAlpha, 0, numPoints, numPoints);
+
+% Use dense matrices for fully connected operators
+if (kNN == numPoints)
+    L = full(L);
+    M = full(M);
+end
+
+end
+
