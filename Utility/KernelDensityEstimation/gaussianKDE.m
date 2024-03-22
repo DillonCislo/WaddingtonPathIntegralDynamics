@@ -72,7 +72,7 @@ elseif isvector(covK)
     
 elseif ismatrix(covK)
     
-    assert(size(covK) == (dim * [1 1]), ...
+    assert(isequal(size(covK), (dim * [1 1])), ...
         'Covariance matrix must be a #D x #D matrix');
     assert(issymmetric(covK), 'Covariance matrix must be symmetric');
     
@@ -100,7 +100,7 @@ elseif isvector(bwK)
     
 elseif ismatrix(bwK)
 
-    assert(size(bwK) == (dim * [1 1]), ...
+    assert(isequal(size(bwK), (dim * [1 1])), ...
         'Bandwidth matrix must be a #D x #D matrix');
     
 else
