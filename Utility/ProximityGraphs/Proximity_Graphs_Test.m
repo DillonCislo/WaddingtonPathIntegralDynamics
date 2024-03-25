@@ -77,7 +77,7 @@ disp(' ');
 
 % Check for graph equality
 if isequal(sortrows(sort(E,2)), sortrows(sort(approxE, 2)))
-    disp('Exhaustive graph and approximate graphs are NOT equal');
+    disp('Exhaustive graph and approximate graphs are equal');
 else
     disp('Exhaustive graph and approximate graphs are NOT equal');
 end

@@ -24,6 +24,10 @@ function [allScalarUniErr, allGroundStateEigs, allU0] = ...
 %       for the drift-diffusion process assumed to generate the input point
 %       set
 %
+%       - ('UseGPU', useGPU = false): Try to compute the groundstate
+%       eigenvector on the GPU. You have to compute ALL eigenvectors in
+%       this case (can only use 'eig', NOT 'eigs') so be careful
+%
 %       - ('Verbose', verbose = false): Whether or not to produce verbose
 %       progress output
 %
@@ -58,6 +62,7 @@ if (size(allTimeSteps,1) ~= 1), allTimeSteps = allTimeSteps.'; end
 
 D = 1;
 D0 = 1;
+useGPU = false;
 verbose = false;
 
 for i = 1:length(varargin)
@@ -75,6 +80,11 @@ for i = 1:length(varargin)
         D0 = varargin{i+1};
         validateattributes(D0, {'numeric'}, ...
             {'scalar', 'positive', 'finite', 'real'});
+    end
+
+    if strcmpi(varargin{i}, 'UseGPU')
+        useGPU = varargin{i+1};
+        validateattributes(useGPU, {'logical'}, {'scalar'});
     end
     
     if strcmpi(varargin{i}, 'Verbose')
@@ -112,6 +122,14 @@ for n = 1:numel(allTimeSteps)
     
     curDensity = gaussianKDE(X, X, [], ...
         sqrt(2 * D * allTimeSteps(n)), verbose);
+
+    % curDensity = gaussianKDE(X, X, [], ...
+    %     sqrt(2 * D * 0.025), verbose);
+
+    % curDensity = mvksdensity(X, X, ...
+    %     'Bandwidth', sqrt(2 * D * allTimeSteps(n)), ...
+    %     'Support', [zeros(1, size(X,2))-eps; ones(1, size(X,2))+eps], ...
+    %     'BoundaryCorrection', 'reflection');
     
     U0 = -D0 * log(curDensity);
     allU0(:, n) = U0;
@@ -129,11 +147,47 @@ for n = 1:numel(allTimeSteps)
     
     if verbose, fprintf('Calculating groundstate eigenvector... '); end
     
-    
-    [eigV, ~] = eigs(T, 5, 'largestabs');
+    if useGPU
+
+        gpuT = gpuArray(T);
+        gpuP = gpuArray(ones(numPoints, 1) ./ numPoints);
+        gpuP = gpuT * gpuP;
+
+        iter = 1;
+        relDiff = inf;
+        diffThresh = 1e-14;
+
+        while (relDiff > diffThresh)
+
+            gpuPrevP = gpuP;
+            gpuP = gpuT * gpuP;
+
+            relDiff = abs(gpuP-gpuPrevP) ./ abs(gpuPrevP);
+            relDiff(isinf(relDiff)) = NaN;
+            relDiff = max(relDiff);
+
+            iter = iter + 1;
+
+            if (iter > 5000)
+                warning(['Failed to converge after %d iterations. ' ...
+                    'Max relative difference = %0.5e'], iter, relDiff);
+                break;
+            end
+
+        end
+
+        eigV = gather(gpuP);
+
+
+    else
+
+        [eigV, ~] = eigs(T, 5, 'largestabs');
+        
+    end
+
     allGroundStateEigs(:, n) = eigV(:,1);
     allScalarUniErr(n) = abs( std(eigV(:,1)) / mean(eigV(:,1)) );
-    
+
     if verbose, fprintf('Done\n'); end
 
 end

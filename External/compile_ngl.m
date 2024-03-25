@@ -1,6 +1,33 @@
 function compile_ngl(verbose)
-% NOTE: You must have 'CMake' installed in order to compile NGL!
-% by Dillon Cislo 
+%COMPILE_NGL script to compile the NGL library. This library has some
+%dependences that are easily installed: CMake, OpenGL, PkgConfig, GLUT,
+%and CAIRO. These can be easily installed on Linux and macOS
+%
+%   LINUX (Ubuntu/Debian) INSTALLATION INSTRUCTIONS:
+%
+%   sudo apt-get update
+%   sudo apt-get install cmake
+%   sudo apt-get install libgl1-mesa-dev libglu1-mesa-dev mesa-common-dev
+%   sudo apt-get install freeglut3-dev
+%   sudo apt-get install pkg-config
+%   sudo apt-get install libcairo2-dev
+%
+%   MACOS INSTALLATION INSTRUCTIONS:
+%   First, ensure that you have Homebrew installed. If you don't already
+%   have it please visit Homebrew's website (brew.sh) for the most
+%   up-to-date installation commands, as they can change.
+%
+%   brew update
+%   brew install cmake pkg-config
+%   brew install cairo
+%
+%   macOS comes with OpenGL support and a native version of GLUT. CMake
+%   should be able to find these automatically. If not you can execute the
+%   commands
+%
+%   brew install freeglut
+%
+% by Dillon Cislo 2024/03/22
 
 % Basic Input Processing --------------------------------------------------
 if (nargin < 1), verbose = false; end
@@ -26,6 +53,20 @@ if ispc
         'documentation.']);
     
 else
+
+    % I don't know why this is the case, but sometimes when you clone the
+    % git repo the ann_1.1.2/lib directory isn't cloned as a directory. In
+    % any case just remove it and make it again
+    annLibDir = fullfile(annDir, 'lib');
+    if exist(annLibDir, 'dir')
+        rmdir(annLibDir, 's');
+    elseif exist(annLibDir, 'file')
+        delete(annLibDir);
+    elseif exist(annLibDir)
+        error(['The ANN ''lib'' path exists, but is ' ...
+            'neither a file nor a directory']);
+    end
+    mkdir(annLibDir);
     
     [status, cmdout] = system('make realclean');
     if (status == 0)
@@ -43,7 +84,6 @@ else
         end
         disp(' ');
         error(errorMessage);
-        
     end
     
     if isunix

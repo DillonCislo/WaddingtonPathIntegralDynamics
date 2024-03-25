@@ -47,7 +47,7 @@ end
 
 validateattributes(pairIDx, {'numeric'}, {'2d', 'finite', 'real', ...
     'ncols', 2, 'positive', '<=', numPoints});
-numPairs = size(pairIDx, 2);
+numPairs = size(pairIDx, 1);
 if (size(unique(pairIDx, 'rows'), 1) ~= numPairs)
     warning('Input pair ID list does not appear to have unique entries');
 end

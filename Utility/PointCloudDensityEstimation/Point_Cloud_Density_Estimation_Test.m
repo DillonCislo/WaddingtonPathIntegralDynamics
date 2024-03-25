@@ -53,7 +53,7 @@ close all; clc;
 
 % Set default subsampling options
 ssMethod = 'spartan';
-numSamples = min(numPoints, 10000);
+numSamples = min(numPoints, 5000);
 omtIter = 500;
 omtWasserThresh = 0;
 qrpType = 'sobol';
@@ -71,10 +71,10 @@ graphOutputFormat = 'symmetric';
 % Set default kernel density estimation options
 kdsigma = -1;
 upsampleEdges = true;
-includeNonSamples = true;
+includeNonSamples = false;
 
 % Set topological simplification options
-persistenceThreshold = 0;
+persistenceThreshold = 0.1;
 sizeThreshold = 5;
 stabilityThreshold = 0;
 distThreshold = 0;
