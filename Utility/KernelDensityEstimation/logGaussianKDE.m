@@ -99,7 +99,7 @@ else
     error('Invalid input covariance format');
     
 end
-invCov = inv(covK);
+% invCov = inv(covK);
 detCov = det(covK);
 
 % Process input bandwidth matrix
@@ -125,7 +125,7 @@ else
     error('Invalid input bandwidth format');
     
 end
-invBW = inv(bwK);
+% invBW = inv(bwK);
 detBW = det(bwK);
 assert(detBW ~= 0, 'Bandwidth matrix must be nonsingular');
 
@@ -156,12 +156,14 @@ try
         
         % Multiply the separation vectors by the bandwidth
         % (A new [dim, numDataPoints] set of column vectors)
-        dij = invBW * dij;
+        % dij = invBW * dij;
+        dij = bwK \ dij;
         
         % Take the dot product of the (bandwidth scaled) separation vectors to
         % find the argument of the exponential in the kernel
-        pointDensity(i) = sum(weights .* exp(-dot(dij, invCov * dij, 1)/2));
-        
+        % pointDensity(i) = sum(weights .* exp(-dot(dij, invCov * dij, 1)/2));
+        pointDensity(i) = sum(weights .* exp(-dot(dij, (covK \ dij), 1)/2));
+
         % if verbose, progressbar(i, numQueryPoints), end
         if verbose, send(parDQ, []); end
         
@@ -179,12 +181,14 @@ catch
         
         % Multiply the separation vectors by the bandwidth
         % (A new [dim, numDataPoints] set of column vectors)
-        dij = invBW * dij;
+        % dij = invBW * dij;
+        dij = bwK \ dij;
         
         % Take the dot product of the (bandwidth scaled) separation vectors to
         % find the argument of the exponential in the kernel
-        pointDensity(i) = sum(weights .* exp(-dot(dij, invCov * dij, 1)/2));
-        
+        % pointDensity(i) = sum(weights .* exp(-dot(dij, invCov * dij, 1)/2));
+        pointDensity(i) = sum(weights .* exp(-dot(dij, (covK \ dij), 1)/2));
+
     end
     
 end
