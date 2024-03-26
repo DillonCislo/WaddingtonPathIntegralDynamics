@@ -194,7 +194,7 @@ for n = 1:numel(allTimeSteps)
 
     % Check if the transition matrix is irreducible
     G = T;
-    G(G(:) < (numPoints * eps(1))) = 0;
+    G(G(:) < zeroTol) = 0;
     G = digraph(G);
     distMatrix = distances(G, 'Method', 'unweighted');
     allIsReducible(n) = any(isinf(distMatrix(:)));
