@@ -3,7 +3,7 @@
 % well studied cotangent Laplacian on a spherical mesh
 clear; close all; clc;
 
-numPoints = 5000;
+numPoints = 8000;
 % X = randsphere(numPoints);
 [X, F] = subdivided_sphere(4);
 
@@ -15,13 +15,11 @@ trueLapYlm = -l * (l+1) * Ylm;
 
 % Compute the discrete Laplacian of the spherical harmonic
 useCotanLaplacian = false;
-symmetrizeLaplacian = false;
 if useCotanLaplacian   
     L = cotmatrix(X, F);
     M = massmatrix(X, F, 'voronoi');
 else   
-    [L, M] = diffusionMapLaplacian(X, -1, -1, symmetrizeLaplacian);
-    L = -L; % Diffusion map Laplacian is POSITIVE definite
+    [L, M] = diffusionMapLaplacian(X, -1, -1);
 end
 lapYlm = (M \ L) * Ylm;
 

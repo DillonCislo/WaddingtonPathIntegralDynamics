@@ -37,6 +37,18 @@ function T = computeTransitionMatrix(X, U, dt, varargin)
 %       for the drift-diffusion process assumed to generate the input point
 %       set
 %
+%       - ('ClipThreshold', clipThreshold = 0): Exponential
+%       distributions produce insanely small values. Entries |T(i,j)| <
+%       this threshold are just set to zero. BE CAREFUL HERE - I HAVE NOT
+%       TESTED THIS THOROUGHLY YET
+%
+%       - ('StrictNormalization', strictNormalization = true): Whether or
+%       not to distribute round-off error in the column-wise normalization.
+%
+%   OUTPUT PARAMETERS:
+%
+%       - T:    #N x #N (left Markov) transition matrix
+%
 %   by Dillon Cislo 2024/03/21
 
 %--------------------------------------------------------------------------
@@ -58,6 +70,8 @@ U0 = U;
 scalarMetric = [];
 D = 1;
 D0 = 1;
+clipThreshold = 0;
+strictNormalization = true;
 
 for i = 1:length(varargin)
     
@@ -92,6 +106,17 @@ for i = 1:length(varargin)
         D0 = varargin{i+1};
         validateattributes(D0, {'numeric'}, ...
             {'scalar', 'positive', 'finite', 'real'});
+    end
+
+    if strcmpi(varargin{i}, 'ClipThreshold')
+        clipThreshold = varargin{i+1};
+        validateattributes(clipThreshold, {'numeric'}, ...
+            {'scalar', 'nonnegative', 'finite', 'real'});
+    end
+
+    if strcmpi(varargin{i}, 'StrictNormalization')
+        strictNormalization = varargin{i+1};
+        validateattributes(strictNormalization, {'logical'}, {'scalar'});
     end
     
 end
@@ -132,9 +157,22 @@ if any(infIDx)
     T(infIDx) = 0;
 end
 
+if (clipThreshold > 0), T(T(:) < clipThreshold) = 0; end
+
 normT = sum(T,1);
 assert(~any(normT == 0), 'Column-wise normalization constant equals 0');
 T = T ./ normT;
-    
+
+if strictNormalization
+    normT = sum(T,1);
+    for i = 1:size(T, 2)
+        if (normT(i) > 1)
+            [~, maxID] = max(T(:, i));
+            T(maxID, i) = T(maxID, i) + (1 - normT(i));
+        end
+    end
 end
 
+assert(~any(T(:) < 0), 'Negative transition probabilities on output');
+    
+end

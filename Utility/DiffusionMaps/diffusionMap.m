@@ -1,4 +1,4 @@
-function [diffMap, lambda, V, MB, DAlpha] = diffusionMap(K, mapOptions)
+function [diffMap, lambda, V, KAlpha, DAlpha] = diffusionMap(K, mapOptions)
 %DIFFUSIONMAP Calculates a diffusion map by embedding D-dimensional data
 %into a Euclidean vector space where Euclidean distance approximates
 %'diffusion' distance on the high-dimensional manifold. See "Geometric
@@ -123,12 +123,12 @@ else
     numEigs = 4;
 end
 
-if isfield(mapOptions, 'symmetrizelaplacian')
-    symmetrizeLaplacian = mapOptions.symmetrizelaplacian;
-    validateattributes(symmetrizeLaplacian, {'logical'}, {'scalar'});
+if isfield(mapOptions, 'symmetrizetransitionoperator')
+    symmetrizeMB = mapOptions.symmetrizetransitionoperator;
+    validateattributes(symmetrizeMB, {'logical'}, {'scalar'});
     mapOptions = rmfield(mapOptions, 'symmetrizelaplacian');
 else
-    symmetrizeLaplacian = true;
+    symmetrizeMB = false;
 end
 
 if isfield(mapOptions, 'normalizedensity')
@@ -172,7 +172,7 @@ if normalizeDensity, KAlpha = KAlpha - diag(diag(KAlpha)); end
 DAlpha = sum(KAlpha, 2);
 MB = spdiags( 1./ DAlpha, 0, size(K,1), size(K,2) ) * KAlpha;    
 
-if symmetrizeLaplacian, MB = (MB + MB.')/2; end
+if symmetrizeMB, MB = (MB + MB.')/2; end
 
 % Caluclate eigenvalues/eigenvectors
 % NOTE: Eigenvector output of both methods are normalized to 1

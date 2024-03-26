@@ -1,4 +1,4 @@
-function [allScalarUniErr, allGroundStateEigs, allU0] = ...
+function [allScalarUniErr, allGroundStateEigs, allU0, allIsReducible] = ...
     scanPointSetGroundStateUniformity(X, allTimeSteps, varargin)
 %SCANPOINTSETGROUNDSTATEUNIFORMITY Assess the uniformity of the ground
 %state of the transition matrix constructed from a point set
@@ -25,8 +25,21 @@ function [allScalarUniErr, allGroundStateEigs, allU0] = ...
 %       set
 %
 %       - ('UseGPU', useGPU = false): Try to compute the groundstate
-%       eigenvector on the GPU. You have to compute ALL eigenvectors in
-%       this case (can only use 'eig', NOT 'eigs') so be careful
+%       eigenvector on the GPU. This is just repeated matrix multiplication
+%       from a random starting vector.
+%
+%       - ('MaxIterations', maxIter = 300 (no GPU) or maxIter = 1000
+%       (GPU)): The number of iterations to use when computing the ground
+%       state eigenvector (either with MATLAB's 'eigs' or through
+%       GPU-accelerated iteration)
+%
+%       - ('Tolerance', tol = 1e-14): The covergence tolerance for the
+%       ground state eigenvector comptuation
+%
+%       - ('EnsembleSize', ensembleSize = 1): For the simple
+%       GPU-accelerated transition operator iteration method, we apply the
+%       iteration to an ensemble of a user specified size and report
+%       ensemble averages
 %
 %       - ('Verbose', verbose = false): Whether or not to produce verbose
 %       progress output
@@ -46,6 +59,12 @@ function [allScalarUniErr, allGroundStateEigs, allU0] = ...
 %                               pseudopotentials computed as a function of
 %                               the user supplied time steps
 %
+%       - allIsReducible:       1 x #T logical vector indicating whether or
+%                               not the corresponding transition matrix is
+%                               reducible. By the Perron-Frobenius theorem,
+%                               irreducible Markov chains have unique
+%                               stationary distributions.
+%
 %   by Dillon Cislo 2024/03/21
 
 %--------------------------------------------------------------------------
@@ -63,6 +82,10 @@ if (size(allTimeSteps,1) ~= 1), allTimeSteps = allTimeSteps.'; end
 D = 1;
 D0 = 1;
 useGPU = false;
+maxIter = 300;
+maxIterSet = false;
+tol = 1e-14;
+ensembleSize = 1;
 verbose = false;
 
 for i = 1:length(varargin)
@@ -86,6 +109,25 @@ for i = 1:length(varargin)
         useGPU = varargin{i+1};
         validateattributes(useGPU, {'logical'}, {'scalar'});
     end
+
+    if strcmpi(varargin{i}, 'MaxIterations')
+        maxIter = varargin{i+1};
+        validateattributes(maxIter, {'numeric'}, ...
+            {'scalar', 'integer', 'finite', 'real', '>', 1});
+        maxIterSet = true;
+    end
+
+    if strcmpi(varargin{i}, 'Tolerance')
+        tol = varargin{i+1};
+        validateattributes(tol, {'numeric'}, ...
+            {'scalar', 'positive', 'finite', 'real'});
+    end
+
+    if strcmpi(varargin{i}, 'EnsembleSize')
+        ensembleSize = varargin{i+1};
+        validateattributes(ensembleSize, {'numeric'}, ...
+            {'scalar', 'integer', 'finite', 'positive', 'real'});
+    end
     
     if strcmpi(varargin{i}, 'Verbose')
         verbose = varargin{i+1};
@@ -93,6 +135,17 @@ for i = 1:length(varargin)
     end
     
 end
+
+if useGPU
+    try
+        gpuDevice;
+        if ~maxIterSet, maxIter = 1000; end
+    catch
+        warning('Failed to find supported GPU device');
+        useGPU = false;
+    end
+end
+
 
 %--------------------------------------------------------------------------
 % SCAN GROUND STATE UNIFORMITY ACROSS TIME STEPS
@@ -106,12 +159,15 @@ end
 allU0 = zeros(numPoints, numel(allTimeSteps));
 allGroundStateEigs = zeros(numPoints, numel(allTimeSteps));
 allScalarUniErr = zeros(1, numel(allTimeSteps));
+allIsReducible = false(1, numel(allTimeSteps));
+
+zeroTol = numPoints * eps(1);
 
 for n = 1:numel(allTimeSteps)
     
     if verbose
-      fprintf('Now processing length scale %d/%d\n', ...
-          n, numel(allTimeSteps));
+      fprintf('Now processing length scale %d/%d = %0.3e\n', ...
+          n, numel(allTimeSteps), allTimeSteps(n));
     end
     
     % Estimate Density From Point Cloud -----------------------------------
@@ -122,14 +178,6 @@ for n = 1:numel(allTimeSteps)
     
     curDensity = gaussianKDE(X, X, [], ...
         sqrt(2 * D * allTimeSteps(n)), verbose);
-
-    % curDensity = gaussianKDE(X, X, [], ...
-    %     sqrt(2 * D * 0.025), verbose);
-
-    % curDensity = mvksdensity(X, X, ...
-    %     'Bandwidth', sqrt(2 * D * allTimeSteps(n)), ...
-    %     'Support', [zeros(1, size(X,2))-eps; ones(1, size(X,2))+eps], ...
-    %     'BoundaryCorrection', 'reflection');
     
     U0 = -D0 * log(curDensity);
     allU0(:, n) = U0;
@@ -139,54 +187,91 @@ for n = 1:numel(allTimeSteps)
     if verbose, fprintf('Constructing transition matrix... '); end
     
     T = computeTransitionMatrix(X, U0, allTimeSteps(n), ...
-        'DiffusionCoefficient', D, 'PointDiffusionCoefficient', D0);
+        'DiffusionCoefficient', D, 'PointDiffusionCoefficient', D0, ...
+        'ClipThreshold', 1e-14, 'StrictNormalization', true);
     
     if verbose, fprintf('Done\n'); end
+
+    % Check if the transition matrix is irreducible
+    G = T;
+    G(G(:) < (numPoints * eps(1))) = 0;
+    G = digraph(G);
+    distMatrix = distances(G, 'Method', 'unweighted');
+    allIsReducible(n) = any(isinf(distMatrix(:)));
+
+    if verbose
+        if allIsReducible(n)
+            disp('Transition matrix is REDUCIBLE');
+        else
+            disp('Transition matrix is IRREDUCIBLE');
+        end
+    end
     
     % Compute Uniformity of Ground State ----------------------------------
     
+    if allIsReducible(n)
+
+        allScalarUniErr(n) = NaN;
+        allGroundStateEigs(:, n) = nan(numPoints, 1);
+        if verbose
+            disp(['A reducible transition matrix has no well ' ...
+                'defined stationary state. Skipping computation.']);
+        end
+
+        continue;
+        
+    end
+
     if verbose, fprintf('Calculating groundstate eigenvector... '); end
     
     if useGPU
 
         gpuT = gpuArray(T);
-        gpuP = gpuArray(ones(numPoints, 1) ./ numPoints);
+        gpuP = gpuArray(rand(numPoints, ensembleSize)+0.1);
+        gpuP = gpuP ./ sum(gpuP, 1);
         gpuP = gpuT * gpuP;
 
         iter = 1;
-        relDiff = inf;
-        diffThresh = 1e-14;
+        allConverged = false;
 
-        while (relDiff > diffThresh)
+        while ~allConverged
 
             gpuPrevP = gpuP;
             gpuP = gpuT * gpuP;
 
             relDiff = abs(gpuP-gpuPrevP) ./ abs(gpuPrevP);
             relDiff(isinf(relDiff)) = NaN;
-            relDiff = max(relDiff);
+            relDiff = max(relDiff, [], 1);
+
+            allConverged = all(relDiff < tol);
 
             iter = iter + 1;
 
-            if (iter > 5000)
-                warning(['Failed to converge after %d iterations. ' ...
-                    'Max relative difference = %0.5e'], iter, relDiff);
+            if (iter >= maxIter)
+                warning(['\nFailed to converge after %d iterations. ' ...
+                    'Max relative difference = %0.5e'], ...
+                    iter, max(relDiff));
                 break;
             end
 
         end
 
         eigV = gather(gpuP);
+        scalarUniErr = abs(std(eigV, 0, 1) ./ mean(eigV, 1)) ;
 
-
+        allScalarUniErr(n) = mean(scalarUniErr);
+        allGroundStateEigs(:, n) = ...
+            eigV(:, knnsearch(scalarUniErr.', mean(scalarUniErr)));
+        
     else
 
-        [eigV, ~] = eigs(T, 5, 'largestabs');
-        
-    end
+        [eigV, ~] = eigs(T, 1, 'largestabs', ...
+            'Tolerance', tol, 'MaxIterations', maxIter);
 
-    allGroundStateEigs(:, n) = eigV(:,1);
-    allScalarUniErr(n) = abs( std(eigV(:,1)) / mean(eigV(:,1)) );
+        allGroundStateEigs(:, n) = eigV(:,1);
+        allScalarUniErr(n) = abs( std(eigV(:,1)) / mean(eigV(:,1)) );
+
+    end
 
     if verbose, fprintf('Done\n'); end
 

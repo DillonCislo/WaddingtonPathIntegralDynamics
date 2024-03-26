@@ -1,10 +1,10 @@
-function [K, nnDists, nnIDx] = affinityMatrix(X, affinityOptions)
+function [K, nnDists, nnIDx, sigmaOut] = affinityMatrix(X, affinityOptions)
 %AFFINITYMATRIX Calculates the affinity matrix used to generate a diffusion
 %map embedding for high-dimensional feature data
 %
 %   INPUT PARAMETERS:
 %
-%       - X:        #X x #D high dimensional point cloud
+%       - X:        #N x #D high dimensional point cloud
 %
 %   OPTIONAL INPUTS (Name, Value)-Pairs:
 %
@@ -42,6 +42,14 @@ function [K, nnDists, nnIDx] = affinityMatrix(X, affinityOptions)
 %
 %       - nnIDx:        k x #X list of data point IDs corresponding to the
 %                       distances in nnDists
+%
+%       - sigmaOut:     The bandwidth of the affinit matrix kernel. If a
+%                       positive, bandwidth was supplied by the user, then
+%                       this is equal to affinityOptions.Sigma. Otherwise,
+%                       it is equal either to (1) the scalar estimate of
+%                       the bandwidth or (2) an #N x 1 vector of the local
+%                       bandwidths determined by the self-tuning algorithm,
+%                       depeneding on the user supplied options.
 %
 %   by Dillon Cislo 12/10/2022
 
@@ -148,14 +156,18 @@ if selfTune
     autoTuneVals = autoTuneVals(:);
     
     vals = exp(-vals.^2 ./ (autoTuneVals+eps));
+
+    sigmaOut = (autoTuneVals + eps) ./ 4;
     
 else
     
     % if (sigma < 0), sigma = median(vals); end
     if (sigma < 0), sigma = (mean(nnDists(:,2))+2*std(nnDists(:,2)))/4; end
-    
+
     % vals = exp(-vals.^2 / (2*sigma.^2));
     vals = exp(-vals.^2 / (4*sigma));
+
+    sigmaOut = sigma;
     
 end
 
