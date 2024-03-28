@@ -68,7 +68,7 @@ validateattributes(numViewTimes, {'numeric'}, {'scalar', 'integer', ...
     'positive', 'finite', 'real', '<=', numTimeSteps+1});
 
 if ((nargin < 5) || isempty(dt)), dt = 1; end
-validateattributes(dt, {'numerc'}, {'scalar', 'positive', ...
+validateattributes(dt, {'numeric'}, {'scalar', 'positive', ...
     'finite', 'real'});
 
 if ((nargin < 6) || isempty(strictNormalization))
@@ -86,7 +86,7 @@ if useGPU, try gpuDevice; catch, useGPU = false; end; end
 %--------------------------------------------------------------------------
 
 viewTIDx = round(linspace(1, numTimeSteps+1, numViewTimes));
-assert(isequal(viewCounts, unique(viewCounts)), ...
+assert(isequal(viewTIDx, unique(viewTIDx)), ...
     'View time assignment failed');
 
 curProb = initProb;

@@ -112,7 +112,7 @@ for i = 1:numPaths
             curPathLengths = curPathLengths.';
         end
 
-        if (numel(curPathLengths) == numel(curPaths))
+        if (numel(curPathLengths) == numel(curPath))
 
             goodPathLengths = (curPathLengths(1) == 0) && ...
                 all(diff(curPathLengths, 1) > 0);
@@ -120,7 +120,7 @@ for i = 1:numPaths
                 'If supplying cumulative weights, the first entry ' ...
                 'must == 0 and the vector must monotonically increase']);
 
-        elseif (numel(curPathLengths) == (numel(curPaths)-1))
+        elseif (numel(curPathLengths) == (numel(curPath)-1))
 
             goodPathLengths = all(curPathLengths > 0);
             assert(goodPathLengths, ['Invalid path lengths supplied. ' ...
@@ -156,6 +156,8 @@ if strcmpi(collisionMethod, 'none'), return; end
 % Detect collisions
 dupl = find_duplicate_rows(interpIDx);
 if isempty(dupl), return; end
+
+warning('Some known vertices assigned multiple values');
 
 if strcmpi(collisionMethod, 'mean')
 

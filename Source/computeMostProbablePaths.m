@@ -64,7 +64,7 @@ allPathLengths = cell(numPairs, 1);
 
 for i = 1:numPairs
     
-    allPaths{i} = shortestpath(diffGraph, pairIDx(i,1), pairIDx(i,2));
+    allPaths{i} = shortestpath(diffGraph, pairIDx(i,1), pairIDx(i,2)).';
     
     curPath = [allPaths{i}(1:(end-1)), allPaths{i}(2:end)];
     if ~isempty(curPath)
