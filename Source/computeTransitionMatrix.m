@@ -73,6 +73,11 @@ D0 = 1;
 clipThreshold = 0;
 strictNormalization = true;
 
+supportedOptions = {'PointPotential', 'ScalarMetric', ...
+    'DiffusionCoefficient', 'PointDiffusionCoefficient', ...
+    'ClipThreshold', 'StrictNormalization'};
+checkSupportedOptions(supportedOptions, varargin);
+
 for i = 1:length(varargin)
     
     if isa(varargin{i}, 'double'), continue; end
@@ -87,13 +92,6 @@ for i = 1:length(varargin)
     
     if strcmpi(varargin{i}, 'ScalarMetric')
         scalarMetric = varargin{i+1};
-        if ~isempty(scalarMetric)
-            validateattributes(scalarMetric, {'numeric'}, {'vector', ...
-                'finite', 'positive', 'real', 'numel', numPoints});
-            if (size(scalarMetric,2) ~= 1)
-                scalarMetric = scalarMetric.';
-            end
-        end
     end
     
     if strcmpi(varargin{i}, 'DiffusionCoefficient')
@@ -119,6 +117,30 @@ for i = 1:length(varargin)
         validateattributes(strictNormalization, {'logical'}, {'scalar'});
     end
     
+end
+
+if ~isempty(scalarMetric)
+
+    % If the metric is constant over all space it is faster to simply
+    % re-scale U than to perform the full metric calculation
+    if isscalar(scalarMetric)
+
+        validateattributes(scalarMetric, {'numeric'}, {'scalar', ...
+            'finite', 'positive', 'real'});
+
+        U = U ./ scalarMetric;
+        scalarMetric = [];
+
+    else
+
+        validateattributes(scalarMetric, {'numeric'}, {'vector', ...
+            'finite', 'positive', 'real', 'numel', numPoints});
+        if (size(scalarMetric,2) ~= 1)
+            scalarMetric = scalarMetric.';
+        end
+
+    end
+
 end
 
 %--------------------------------------------------------------------------

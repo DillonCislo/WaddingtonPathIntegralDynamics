@@ -50,7 +50,7 @@ if (nargout > 1)
     % self-loop. This is a sufficient, but not a necessary condition
     selfTransitionProb = diag(T);
     hasSelfLoop = cellfun(@(x) any(selfTransitionProb(x) > 0), ...
-        SCC, 'UniformOutput', 'true');
+        SCC, 'UniformOutput', true);
     
     if all(hasSelfLoop)
 

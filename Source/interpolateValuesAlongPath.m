@@ -57,6 +57,10 @@ allPathLengths = {};
 interpMethod = 'weighted';
 collisionMethod = 'mean';
 
+supportedOptions = {'PathLengths', 'InterpolationMethod', ...
+    'CollisionMethod'};
+checkSupportedOptions(supportedOptions, varargin);
+
 allInterpolationMethods = {'weighted', 'unweighted'};
 allCollisionMethods = {'mean', 'none'};
 

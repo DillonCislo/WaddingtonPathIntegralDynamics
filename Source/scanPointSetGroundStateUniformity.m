@@ -88,6 +88,11 @@ tol = 1e-14;
 ensembleSize = 1;
 verbose = false;
 
+supportedOptions = {'DiffusionCoefficient', ...
+    'PointDiffusionCoefficient', 'UseGPU', 'MaxIterations', ...
+    'Tolerance', 'EnsembleSize', 'Verbose'};
+checkSupportedOptions(supportedOptions, varargin);
+
 for i = 1:length(varargin)
     
     if isa(varargin{i}, 'double'), continue; end
