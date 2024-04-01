@@ -71,8 +71,10 @@ for i = 1:length(varargin)
 
     if strcmpi(varargin{i}, 'PathLengths')
         allPathLengths = varargin{i+1};
-        validateattributes(allPathLengths, {'cell'}, ...
-            {'vector', 'numel', numPaths});
+        if ~isempty(allPathLengths)
+            validateattributes(allPathLengths, {'cell'}, ...
+                {'vector', 'numel', numPaths});
+        end
     end
 
     if strcmpi(varargin{i}, 'InterpolationMethod')
