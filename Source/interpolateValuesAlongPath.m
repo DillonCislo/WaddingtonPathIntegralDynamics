@@ -163,6 +163,7 @@ if strcmpi(collisionMethod, 'none'), return; end
 dupl = find_duplicate_rows(interpIDx);
 if isempty(dupl), return; end
 
+disp(' ');
 warning('Some known vertices assigned multiple values');
 
 if strcmpi(collisionMethod, 'mean')

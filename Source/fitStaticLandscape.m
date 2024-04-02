@@ -251,7 +251,7 @@ assert(all(cellfun(@(x) numel(x) > 1, allPaths, 'Uni', true)), ...
 % fixInPathIDx: #Px2 array of indices into 'fixPointIDx' mapping
 % minima/saddles back into their corresponding paths
 fixInPathIDx = cellfun(@(x) [x(1); x(end)], allPaths, 'Uni', false);
-fixInPathIDx = mat2cell(fixInPathIDx);
+fixInPathIDx = cell2mat(fixInPathIDx);
 [fixPointIDx, ~, fixInPathIDx] = unique(reshape(fixInPathIDx.', [], 1));
 fixInPathIDx = reshape(fixInPathIDx, [2 numPaths]).';
 numFixPoints = numel(fixPointIDx);
