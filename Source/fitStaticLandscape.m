@@ -328,7 +328,8 @@ for i = 1:length(varargin)
         initGuess = varargin{i+1};
         if ~isempty(initGuess)
             validateattributes(initGuess, {'numeric'}, ...
-                {'vector', 'finite', 'real'});
+                {'vector', 'finite', 'real'}, ...
+                'fitStaticLandScape', 'initGuess');
             if (size(initGuess, 2) ~= 1), initGuess = initGuess.'; end
         end
     end
@@ -339,14 +340,16 @@ for i = 1:length(varargin)
             initConditions = cell(numDataSets, 1);
         else
             validateattributes(initConditions, {'cell'}, ...
-                {'vector', 'numel', numDataSets});
+                {'vector', 'numel', numDataSets}, ...
+                'fitStaticLandScape', 'initConditions');
         end
     end
 
     if strcmpi(varargin{i}, 'NumSimTimes')
         numSimTimes = varargin{i+1};
         validateattributes(numSimTimes, {'numeric'}, ...
-            {'scalar', 'positive', 'integer', 'finite', 'real'});
+            {'scalar', 'positive', 'integer', 'finite', 'real'}, ...
+            'fitStaticLandscape', 'numSimTimes');
     end
 
     if strcmpi(varargin{i}, 'IsSaddle')
@@ -359,27 +362,31 @@ for i = 1:length(varargin)
         else
             validateattributes(isSaddle, {'numeric'}, ...
                 {'vector', 'integer', 'positive', 'finite', 'real', ...
-                '<=', numFixedPoints});
+                '<=', numFixedPoints}, ...
+                'fitStaticLandscape', 'isSaddle');
             isSaddle = ismember((1:numFixedPoints).', isSaddle);
         end
     end
 
     if strcmpi(varargin{i}, 'EnforceSaddles')
         enforceSaddles = varargin{i+1};
-        validateattributes(enforceSaddles, {'logical'}, {'scalar'});
+        validateattributes(enforceSaddles, {'logical'}, {'scalar'}, ...
+            'fitStaticLandscape', 'enforceSaddles');
     end
 
     if strcmpi(varargin{i}, 'ConstHeightSum')
         constHeightSum = varargin{i+1};
         if ~isempty(constHeightSum)
             validateattributes(constHeightSum, {'numeric'}, ...
-                {'scalar', 'finite', 'real'});
+                {'scalar', 'finite', 'real'}, ...
+                'fitStaticLandscape', 'constHeightSum');
         end
     end
 
     if strcmpi(varargin{i}, 'SimTimeHandling')
         simTimeHandling = lower(varargin{i+1});
-        validateattributes(simTimeHandling, {'char'}, {'vector'});
+        validateattributes(simTimeHandling, {'char'}, {'vector'}, ...
+            'fitStaticLandscape', 'simTimeHandling');
         assert(ismember(simTimeHandling, simTimeHandlingOptions), ...
             'Invalid simulation time handling option supplied');
     end
@@ -397,13 +404,15 @@ for i = 1:length(varargin)
         constScalarMetric = varargin{i+1};
         if ~isempty(constScalarMetric)
             validateattributes(constScalarMetric, {'numeric'}, ...
-                {'scalar', 'positive', 'finite', 'real'});
+                {'scalar', 'positive', 'finite', 'real'}, ...
+                'fitStaticLandscape', 'constScalarMetric');
         end
     end
 
     if strcmpi(varargin{i}, 'OptimizationOptions')
-        optOptions = varargin{i};
-        validateattribtues(optOptions, {'cell'}, {'vector'});
+        optOptions = varargin{i+1};
+        validateattributes(optOptions, {'cell'}, {'vector'}, ...
+            'fitStaticLandscape', 'optOptions');
     end
 
     % Physical Constants --------------------------------------------------
@@ -411,13 +420,15 @@ for i = 1:length(varargin)
     if strcmpi(varargin{i}, 'DiffusionCoefficient')
         D = varargin{i+1};
         validateattributes(D, {'numeric'}, ...
-            {'scalar', 'positive', 'finite', 'real'});
+            {'scalar', 'positive', 'finite', 'real'}, ...
+            'fitStaticLandscape', 'D');
     end
     
     if strcmpi(varargin{i}, 'PointDiffusionCoefficient')
         D0 = varargin{i+1};
         validateattributes(D0, {'numeric'}, ...
-            {'scalar', 'positive', 'finite', 'real'});
+            {'scalar', 'positive', 'finite', 'real'}, ...
+            'fitStaticLandscape', 'D0');
     end
 
     % Manifold/Point Set/Potential Properties -----------------------------
@@ -426,7 +437,8 @@ for i = 1:length(varargin)
         U0 = varargin{i+1};
         if ~isempty(U0)
             validateattributes(U0, {'numeric'}, {'vector', ...
-                'finite', 'real', 'numel', numPoints});
+                'finite', 'real', 'numel', numPoints}, ...
+                'fitStaticLandscape', 'U0');
             if (size(U0,2) ~= 1), U0 = U0.'; end
         end
     end
@@ -434,8 +446,9 @@ for i = 1:length(varargin)
     if strcmpi(varargin{i}, 'BasePotential')
         UB = varargin{i+1};
         if ~isempty(UB)
-            validateattribtues(UB, {'numeric'}, {'vector', ...
-                'finite', 'real', 'numel', numPoints});
+            validateattributes(UB, {'numeric'}, {'vector', ...
+                'finite', 'real', 'numel', numPoints}, ...
+                'fitStaticLandscape', 'UB');
             if (size(UB,2) ~= 1), UB = UB.'; end
         end
     end
@@ -449,19 +462,22 @@ for i = 1:length(varargin)
     if strcmpi(varargin{i}, 'TikhonovRegularization')
         regSigma = varargin{i+1};
         validateattributes(regSigma, {'numeric'}, ...
-            {'scalar', 'nonnegative', 'finite', 'real'});
+            {'scalar', 'nonnegative', 'finite', 'real'}, ...
+            'fitStaticLandscape', 'regSigma');
     end
 
     if strcmpi(varargin{i}, 'RemoveOutliers')
         removeOutliers = varargin{i+1};
-        validateattributes(removeOutliers, {'logical'}, {'scalar'});
+        validateattributes(removeOutliers, {'logical'}, {'scalar'}, ...
+            'fitStaticLandscape', 'removeOutliers');
     end
 
     if strcmpi(varargin{i}, 'OutlierThreshold')
         outlierThreshold = varargin{i+1};
         if ~isempty(outlierThrehsold)
             validateattribtues(outlierThreshold, {'numeric'}, ...
-                {'vector', 'numel', 2, 'finite', 'real'});
+                {'vector', 'numel', 2, 'finite', 'real'}, ...
+                'fitStaticLandscape', 'outlierThreshold');
             assert(outlierThreshold(2) > outlierThreshold(1), ...
                 ['Outlier threshold must have a second element ' ...
                 'that is greater than its first element']); 
@@ -471,12 +487,14 @@ for i = 1:length(varargin)
     if strcmpi(varargin{i}, 'OutlierNeighbors')
         outlierNNSize = varargin{i+1};
         validateattributes(outlierNNSize, {'numeric'}, ...
-            {'positive', 'integer', 'scalar', 'finite', 'real'});
+            {'positive', 'integer', 'scalar', 'finite', 'real', ...
+            'fitStaticLandscape', 'outlierNNSize'});
     end
 
     if strcmpi(varargin{i}, 'NormalizeMassMatrix')
         normalizeMassMatrix = varargin{i+1};
-        validateattributes(normalizeMassMatrix, {'logical'}, {'scalar'});
+        validateattributes(normalizeMassMatrix, {'logical'}, {'scalar'}, ...
+            'fitStaticLandscape', 'normalizeMassMatrix');
     end
 
     % 'interpolateValuesAlongPath' Options --------------------------------
@@ -484,17 +502,20 @@ for i = 1:length(varargin)
     if strcmpi(varargin{i}, 'PathLengths')
         allPathLengths = varargin{i+1};
         validateattributes(allPathLengths, {'cell'}, ...
-            {'vector', 'numel', numPaths});
+            {'vector', 'numel', numPaths}, ...
+            'fitStaticLandscape', 'allPathLengths');
     end
 
     if strcmpi(varargin{i}, 'PathInterpolationMethod')
         pathInterpMethod = lower(varargin{i+1});
-        validateattributes(pathInterpMethod, {'char'}, {'vector'});
+        validateattributes(pathInterpMethod, {'char'}, {'vector'}, ...
+            'fitStaticLandscape', 'PathInterpolationMethod');
     end
 
     if strcmpi(varargin{i}, 'PathCollisionMethod')
         pathCollisionMethod = lower(varargin{i+1});
-        validateattributes(pathCollisionMethod, {'char'}, {'vector'});
+        validateattributes(pathCollisionMethod, {'char'}, {'vector'}, ...
+            'fitStaticLandscape', 'pathCollisionMethod');
     end
 
     % 'computeTransitionMatrix' Options -----------------------------------
@@ -502,24 +523,28 @@ for i = 1:length(varargin)
     if strcmpi(varargin{i}, 'ClipThreshold')
         clipThreshold = varargin{i+1};
         validateattribtues(clipThreshold, {'numeric'}, ...
-            {'scalar', 'nonnegative', 'finite', 'real'});
+            {'scalar', 'nonnegative', 'finite', 'real'}, ...
+            'fitStaticLandscape', 'clipThreshold');
     end
 
     if strcmpi(varargin{i}, 'StrictNormalization')
         strictNormalization = varargin{i+1};
-        validateattributes(strictNormalization, {'logical'}, {'scalar'});
+        validateattributes(strictNormalization, {'logical'}, {'scalar'}, ...
+            'fitStaticLandscape', 'strictNormalization');
     end
 
     % General Options -----------------------------------------------------
 
     if strcmpi(varargin{i}, 'UseGPU')
         useGPU = varargin{i+1};
-        validateattributes(useGPU, {'logical'}, {'scalar'});
+        validateattributes(useGPU, {'logical'}, {'scalar'}, ...
+            'fitStaticLandscape', 'useGPU');
     end
 
     if strcmpi(varargin{i}, 'Verbose')
         verbose = varargin{i+1};
-        validateattributes(verbose, {'logical'}, {'scalar'});
+        validateattributes(verbose, {'logical'}, {'scalar'}, ...
+            'fitStaticLandscape', 'verbose');
     end
 
 end
@@ -536,7 +561,7 @@ numConstHeights = sum(~isnan(constFixHeights));
 % Process the supplied initial guess --------------------------------------
 if ~isempty(initGuess)
 
-    assert(numel(initGuess) == (numFixedPoints+1), ...
+    assert(numel(initGuess) == (numFixPoints+1), ...
         'Initial guess is improperly sized');
 
     if ~isempty(constScalarMetric)
@@ -665,6 +690,8 @@ A = []; b = [];
 
 if enforceSaddles
 
+    if verbose, disp('Adding saddle height inequality constraint'); end
+
     saddleIDx = find(isSaddle);
     saddleInPath = ismember(fixInPathIDx, saddleIDx);
     assert(all(ismember(sum(saddleInPath, 2), [0 1])), ...
@@ -687,6 +714,8 @@ Aeq = []; beq = [];
 
 if (numConstHeights > 0)
 
+    if verbose, disp('Adding fixed height constraint'); end
+
     Aeq = full(sparse(1:numConstHeights, find(~isnan(constFixHeights)), ...
         1, numConstHeights, numFixPoints+1));
     beq = reshape(constFixHeights(~isnan(constFixHeights)), [], 1);
@@ -695,12 +724,16 @@ end
 
 if ~isempty(constHeightSum)
 
+    if verbose, disp('Adding height sum constraint'); end
+
     Aeq = [Aeq; ones(1, numFixPoints) 0];
     beq = [beq; constHeightSum];
 
 end
 
 if ~isempty(constScalarMetric)
+
+    if verbose, disp('Adding fixed scalar metric constraint'); end
 
     Aeq = [Aeq; full(sparse(1, numFixPoints+1, 1, 1, numFixPoints+1))];
     beq = [beq; constScalarMetric];
@@ -721,7 +754,7 @@ else
 end
 
 options = optimoptions('fmincon', optOptions{:});
-if options.useParallel, useGPU = false; end
+if options.UseParallel, useGPU = false; end
 
 [optOutput, optKLDErr] = fmincon(optFun, ...
     initGuess, A, b, Aeq, beq, lb, ub, [], options);
@@ -814,7 +847,7 @@ else
 
 end
 
-if verbose, ('Done\n'); end
+if verbose, fprintf('Done\n'); end
 
 %**************************************************************************
 %**************************************************************************

@@ -116,7 +116,7 @@ for i = 1:numel(varargin)
 
     if strcmpi(varargin{i}, 'OutlierThreshold')
         outlierThreshold = varargin{i+1};
-        if ~isempty(outlierThrehsold)
+        if ~isempty(outlierThreshold)
             validateattribtues(outlierThreshold, {'numeric'}, ...
                 {'vector', 'numel', 2, 'finite', 'real'});
             assert(outlierThreshold(2) > outlierThreshold(1), ...

@@ -25,8 +25,11 @@ function [interpVals, interpIDx] = ...
 %       according to the number of points along the path. If no path
 %       lengths are supplied, 'weighted' and 'unweighted' are equivalent
 %
-%       -('CollisionMethod', collisionMethod = 'mean'): How to handle the
+%       - ('CollisionMethod', collisionMethod = 'mean'): How to handle the
 %       case where multiple paths intersect at a subset of the points.
+%
+%       - ('Verbose', verbose = false): Whether or not to print warnings
+%       which collisions occur
 %
 %   OUTPUT PARAMETERS:
 %
@@ -56,9 +59,10 @@ assert(all(cellfun(@(x) numel(x) > 1, allPaths, 'Uni', true)), ...
 allPathLengths = {};
 interpMethod = 'weighted';
 collisionMethod = 'mean';
+verbose = false;
 
 supportedOptions = {'PathLengths', 'InterpolationMethod', ...
-    'CollisionMethod'};
+    'CollisionMethod', 'Verbose'};
 checkSupportedOptions(supportedOptions, varargin);
 
 allInterpolationMethods = {'weighted', 'unweighted'};
@@ -80,7 +84,7 @@ for i = 1:length(varargin)
     if strcmpi(varargin{i}, 'InterpolationMethod')
         interpMethod = lower(varargin{i+1});
         validateattributes(interpMethod, {'char'}, {'vector'});
-        assert(ismember(interpmethod, allInterpolationMethods), ...
+        assert(ismember(interpMethod, allInterpolationMethods), ...
             'Invalid interpolation method supplied');
     end
 
@@ -89,6 +93,11 @@ for i = 1:length(varargin)
         validateattributes(collisionMethod, {'char'}, {'vector'});
         assert(ismember(collisionMethod, allCollisionMethods), ...
             'Invalid collision method supplied');
+    end
+
+    if strcmpi(varargin{i}, 'Verbose')
+        verbose = varargin{i+1};
+        validateattributes(verbose, {'logical'}, {'scalar'});
     end
 
 end
@@ -163,8 +172,7 @@ if strcmpi(collisionMethod, 'none'), return; end
 dupl = find_duplicate_rows(interpIDx);
 if isempty(dupl), return; end
 
-disp(' ');
-warning('Some known vertices assigned multiple values');
+if verbose, warning('Some known vertices assigned multiple values'); end
 
 if strcmpi(collisionMethod, 'mean')
 

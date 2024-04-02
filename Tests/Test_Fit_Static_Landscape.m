@@ -236,6 +236,7 @@ clear U1 U2 U1Colors U2Colors axArray Link fig numContours
 % BASE potential
 close all; clc;
 
+% rng(88, 'twister');
 rng(25, 'twister'); % For reproducible random numbers
 
 D0 = 1; % Diffusion coefficient
@@ -324,6 +325,7 @@ set(gca, 'Color', 'k');
 set(gca, 'Clim', crange);
 title('3D Simulated Point Locations');
 axis equal tight
+camproj('orthographic');
 
 subplot(1,3,3)
 nBins = 20;
@@ -443,7 +445,7 @@ for i = 1:numDataSets
 
     % Choose the number of data sets to retain (not including the initial
     % condition)
-    numTimePoints = 100; % randi([3 5]);
+    numTimePoints = 5; % randi([3 5]);
     keepIDx = knnsearch(viewTimes.', ...
         linspace(0, max(viewTimes), numTimePoints).');
     dataProb{i} = allProbabilities(:, keepIDx);
@@ -555,9 +557,31 @@ for tidx = 1:size(viewProb, 2)
 
     drawnow
 
-    pause(0.1);
+    pause(1);
 
 end
 
 
 clear viewID viewProb viewTimes probCRange viewDensity densCRange
+
+%% ************************************************************************
+% *************************************************************************
+%                       FIT STATIC LANDSCAPE
+% *************************************************************************
+% *************************************************************************
+close all; clc;
+
+optOptions = {'Display', 'iter', 'FiniteDifferenceType', 'forward', ...
+    'UseParallel', true, 'PlotFcn', {'optimplotx', 'optimplotfval'}};
+
+[KLDErr, fixHeights, scalarMetric, timeScale, fitTimes] = ...
+    fitStaticLandscape( simX, dataProb, dataTimes, dt, allPaths, ...
+    'InitialGuess', ones(numel(isSaddle)+1, 1), 'InitialConditions', {}, ...
+    'NumSimTimes', numSimTimes, 'IsSaddle', isSaddle, ...
+    'EnforceSaddles', false, 'ConstHeightSum', [], ...
+    'SimTimeHandling', 'causal', 'OptimizationOptions', optOptions, ...
+    'ConstFixedHeights', [], 'ConstScalarMetric', [], ...
+    'PointPotential', U0, 'BasePotential', U0, ...
+    'Laplacian', [], 'MassMatrix', [], 'PathLengths', allPathLengths, ...
+    'UseGPU', false, 'Verbose', true );
+
