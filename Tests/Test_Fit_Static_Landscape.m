@@ -411,7 +411,7 @@ trueU = (U0 + trueUI) ./ trueScalarMetric;
 
 probSigma = 0.05;
 numSimTimes = 500;
-numDataSets = 1;
+numDataSets = 3;
 assert(numDataSets <= 5, 'Please choose a number of data sets <= 5');
 
 fprintf('Generating simulated data set... ')
@@ -517,7 +517,7 @@ clear baseCRange interpCRange dynCRange
 %% View Simulate Probability Time Course ==================================
 close all; clc;
 
-viewID = 1;
+viewID = 3;
 viewProb = dataProb{viewID};
 viewDensity = exp(-U0 ./ D0) .* viewProb;
 viewTimes = dataTimes{viewID};
@@ -571,16 +571,29 @@ clear viewID viewProb viewTimes probCRange viewDensity densCRange
 % *************************************************************************
 close all; clc;
 
+% Set optimization options
 optOptions = {'Display', 'iter', 'FiniteDifferenceType', 'forward', ...
     'UseParallel', true, 'PlotFcn', {'optimplotx', 'optimplotfval'}};
 
-[KLDErr, fixHeights, scalarMetric, timeScale, fitTimes] = ...
+% Generate an initial guess that satisfies the constraints (just a
+% potential height sum constraint here)
+% initGuess = 0.25 * rand(numel(isSaddle), 1) + 0.5;
+% initGuess = sum(trueFixHeights) * (initGuess ./ sum(initGuess));
+% initGuess = [initGuess; 1];
+
+% Generic initial guess (no constraints)
+initGuess = [zeros(numel(trueFixHeights), 1); 1];
+constFixHeights = nan(size(trueFixHeights));
+constFixHeights(end) = 0; 
+
+[KLDErr, fixHeights, scalarMetric, timeScale, fitTimes, optOutput] = ...
     fitStaticLandscape( simX, dataProb, dataTimes, dt, allPaths, ...
-    'InitialGuess', ones(numel(isSaddle)+1, 1), 'InitialConditions', {}, ...
+    'InitialGuess', initGuess, 'InitialConditions', {}, ...
     'NumSimTimes', numSimTimes, 'IsSaddle', isSaddle, ...
     'EnforceSaddles', false, 'ConstHeightSum', [], ...
-    'SimTimeHandling', 'causal', 'OptimizationOptions', optOptions, ...
-    'ConstFixedHeights', [], 'ConstScalarMetric', [], ...
+    'SimTimeHandling', 'none', 'OptimizationOptions', optOptions, ...
+    'ConstFixedHeights', constFixHeights, 'ConstScalarMetric', [], ...
+    'EnforcePositiveMetric', false, ...
     'PointPotential', U0, 'BasePotential', U0, ...
     'Laplacian', [], 'MassMatrix', [], 'PathLengths', allPathLengths, ...
     'UseGPU', false, 'Verbose', true );

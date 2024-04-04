@@ -1,6 +1,6 @@
 function [optKLDErr, optFixHeights, optScalarMetric, ...
-    optTimeScale, optTimes] = fitStaticLandscape(X, dataProb, ...
-    dataTimes, dt, allPaths, varargin)
+    optTimeScale, optTimes, optOutput] = fitStaticLandscape( ...
+    X, dataProb, dataTimes, dt, allPaths, varargin)
 %FITSTATICLANDSCAPE Fits a single static dynamical landscape to a set of
 %input time-series data by minimizing an average (symmetric) K-L divergence
 %over each data point and its corresponding simulation point. The degrees
@@ -65,7 +65,11 @@ function [optKLDErr, optFixHeights, optScalarMetric, ...
 %       determined from the 'allPaths' variable. This field must be
 %       specified in order to enforce the saddles.
 %
-%       - ('EnforceSaddles', enforceSaddles = true): Whether or not to
+%       - ('EnforcePositiveMetric', enforcePositiveMetric = true): Whether
+%       or not to set a bound constraint on the scalar metric. Be sure to
+%       choose a good initial condition if you turn this off!
+%
+%       - ('EnforceSaddles', enforceSaddles = false): Whether or not to
 %       enforce the constraint that index-1 saddles have a greater
 %       potential height than the corresponding minima (i.e. prevent
 %       saddles from becoming minima)
@@ -218,6 +222,10 @@ function [optKLDErr, optFixHeights, optScalarMetric, ...
 %                           for each data point in each data set. Behavior
 %                           is determined the 'simTimeHandling' field.
 %
+%       - optOutput:        A struct containing information about the
+%                           optimization process. See 'fmincon' or
+%                           'fminunc'
+%
 %   by Dillon Cislo 2024/04/01
 
 %==========================================================================
@@ -265,7 +273,8 @@ initGuess = [];
 initConditions = cell(numDataSets, 1);
 numSimTimes = 500;
 isSaddle = false(1, numFixPoints);
-enforceSaddles = true;
+enforceSaddles = false;
+enforcePositiveMetric = true;
 constHeightSum = [];
 simTimeHandling = 'none';
 constFixHeights = nan(numFixPoints, 1);
@@ -313,7 +322,7 @@ supportedOptions = {'InitialConditions', 'NumSimTimes', 'IsSaddle', ...
     'RemoveOutliers', 'OutlierThreshold', 'OutlierNeighbors', ...
     'NormalizeMassMatrix', 'PathLengths', 'PathInterpolationMethod', ...
     'PathCollisionMethod', 'ClipThreshold', 'StrictNormalization', ...
-    'UseGPU', 'InitialGuess'};
+    'UseGPU', 'InitialGuess', 'EnforcePositiveMetric'};
 checkSupportedOptions(supportedOptions, varargin);
 
 for i = 1:length(varargin)
@@ -374,6 +383,12 @@ for i = 1:length(varargin)
             'fitStaticLandscape', 'enforceSaddles');
     end
 
+    if strcmpi(varargin{i}, 'EnforcePositiveMetric')
+        enforcePositiveMetric = varargin{i+1};
+        validateattributes(enforcePositiveMetric, {'logical'}, {'scalar'}, ...
+            'fitStaticLandscape', 'enforcePositiveMetric');
+    end
+
     if strcmpi(varargin{i}, 'ConstHeightSum')
         constHeightSum = varargin{i+1};
         if ~isempty(constHeightSum)
@@ -395,7 +410,7 @@ for i = 1:length(varargin)
         constFixHeights = varargin{i+1};
         if ~isempty(constFixHeights)
             assert(isvector(constFixHeights) && ...
-                numel(constFixHeights) == numFixedHeights, ...
+                numel(constFixHeights) == numFixPoints, ...
                 'Constrained heights are improperly sized');
         end
     end
@@ -683,6 +698,12 @@ end
 %==========================================================================
 % BUILD OPTIMIZATION PROBLEM
 %==========================================================================
+% The saddle inequality constraint and the total height sum constraint are
+% the only non-trivial constraint. If either one of these are supplied, we
+% formulate the full constrained problem and run a corresponding
+% constrained minimization. If neither of these constraints are enforced,
+% we enforce any remaining constraints by construction and run an
+% unconstraind minimization
 
 % Build inequality constraints --------------------------------------------
 
@@ -708,19 +729,9 @@ if enforceSaddles
 
 end
 
-% Build equality/bound constraints ----------------------------------------
+% Build equality constraints ----------------------------------------------
 
 Aeq = []; beq = [];
-
-if (numConstHeights > 0)
-
-    if verbose, disp('Adding fixed height constraint'); end
-
-    Aeq = full(sparse(1:numConstHeights, find(~isnan(constFixHeights)), ...
-        1, numConstHeights, numFixPoints+1));
-    beq = reshape(constFixHeights(~isnan(constFixHeights)), [], 1);
-
-end
 
 if ~isempty(constHeightSum)
 
@@ -731,17 +742,54 @@ if ~isempty(constHeightSum)
 
 end
 
+if (numConstHeights > 0)
+
+    if verbose, disp('Adding fixed height constraint'); end
+
+    Aeq = [Aeq; ...
+        full(sparse(1:numConstHeights, find(~isnan(constFixHeights)), ...
+        1, numConstHeights, numFixPoints+1))];
+    beq = [beq; reshape(constFixHeights(~isnan(constFixHeights)), [], 1)];
+
+end
+
 if ~isempty(constScalarMetric)
 
     if verbose, disp('Adding fixed scalar metric constraint'); end
+
+    % There is no need to enforce a positive metric if it is already fixed
+    enforcePositiveMetric = false;
 
     Aeq = [Aeq; full(sparse(1, numFixPoints+1, 1, 1, numFixPoints+1))];
     beq = [beq; constScalarMetric];
 
 end
 
-lb = [-inf(numFixPoints, 1); 1e-12];
+% Set bound constraints ---------------------------------------------------
+
+if enforcePositiveMetric
+    lb = [-inf(numFixPoints, 1); 1e-12];
+else
+    lb = -inf(numFixPoints+1, 1);
+end
+
 ub = inf(numFixPoints+1, 1);
+
+% Determine if unconstrained minimization is feasible ---------------------
+
+constrainedValues = nan(numFixPoints+1, 1);
+runConstrainedMinimization = true;
+if ~enforceSaddles && ~enforcePositiveMetric && isempty(constHeightSum)
+
+    runConstrainedMinimization = false;
+    constrainedValues(1:numFixPoints) = constFixHeights;
+    if ~isempty(constScalarMetric)
+        constrainedValues(end) = constScalarMetric;
+    end
+
+    initGuess(~isnan(constrainedValues)) = [];
+
+end
 
 %==========================================================================
 % RUN OPTIMIZATION
@@ -753,14 +801,33 @@ else
     optFun = @simulateLandscapeDynamics;
 end
 
-options = optimoptions('fmincon', optOptions{:});
-if options.UseParallel, useGPU = false; end
+if runConstrainedMinimization
 
-[optOutput, optKLDErr] = fmincon(optFun, ...
-    initGuess, A, b, Aeq, beq, lb, ub, [], options);
+    if verbose, disp('Running constrained optimization'); end
 
-optFixHeights = optOutput(1:numFixPoints);
-optScalarMetric = optOutput(numFixPoints+1);
+    options = optimoptions('fmincon', optOptions{:});
+    if options.UseParallel, useGPU = false; end
+
+    [optVals, optKLDErr, ~, optOutput] = ...
+        fmincon(optFun, initGuess, A, b, Aeq, beq, lb, ub, [], options);
+
+else
+
+    if verbose, disp('Running unconstrained optimization'); end
+
+    options = optimoptions('fminunc', optOptions{:});
+    if options.UseParallel, useGPU = false; end
+
+    [optVals, optKLDErr, ~, optOutput] = ...
+        fminunc(optFun, initGuess, options);
+
+end
+
+optConstrainedValues = constrainedValues;
+optConstrainedValues(isnan(constrainedValues)) = optVals;
+
+optFixHeights = optConstrainedValues(1:numFixPoints);
+optScalarMetric = optConstrainedValues(numFixPoints+1);
 
 %--------------------------------------------------------------------------
 % FORMAT OUTPUT
@@ -857,8 +924,11 @@ if verbose, fprintf('Done\n'); end
 
     function E = simulateLandscapeDynamics(x)
 
-        scalarMetric = x(end);
-        fixHeights = x(1:numFixPoints);
+        locConstrainedValues = constrainedValues;
+        locConstrainedValues(isnan(constrainedValues)) = x;
+
+        scalarMetric = locConstrainedValues(end);
+        fixHeights = locConstrainedValues(1:numFixPoints);
 
         % Convert fixed point height list into path end point values
         endPointVals = fixHeights(fixInPathIDx);
@@ -940,8 +1010,11 @@ if verbose, fprintf('Done\n'); end
 
     function E = simulateLandscapeDynamicsConstTimeScale(x)
 
-        scalarMetric = x(end);
-        fixHeights = x(1:numFixPoints);
+        locConstrainedValues = constrainedValues;
+        locConstrainedValues(isnan(constrainedValues)) = x;
+
+        scalarMetric = locConstrainedValues(end);
+        fixHeights = locConstrainedValues(1:numFixPoints);
 
         % Convert fixed point height list into path end point values
         endPointVals = fixHeights(fixInPathIDx);
