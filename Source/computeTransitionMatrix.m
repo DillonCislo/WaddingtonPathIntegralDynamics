@@ -54,15 +54,17 @@ function T = computeTransitionMatrix(X, U, dt, varargin)
 %--------------------------------------------------------------------------
 % INPUT PROCESSING
 %--------------------------------------------------------------------------
-validateattributes(X, {'numeric'}, {'2d', 'finite', 'real'});
+validateattributes(X, {'numeric'}, {'2d', 'finite', 'real'}, ...
+    'computeTransitionMatrix', 'X');
 numPoints = size(X,1); % dim = size(X,2);
 
 validateattributes(U, {'numeric'}, {'vector', 'finite', 'real', ...
-    'numel', numPoints});
+    'numel', numPoints}, 'computeTransitionMatrix', 'U');
 if (size(U,2) ~= 1), U = U.'; end
 
 validateattributes(dt, {'numeric'}, ...
-    {'scalar', 'positive', 'finite', 'real'});
+    {'scalar', 'positive', 'finite', 'real'}, ...
+    'computeTransitionMatrix', 'dt');
 
 % OPTIONAL INPUT PROCESSING -----------------------------------------------
 
@@ -86,7 +88,8 @@ for i = 1:length(varargin)
     if strcmpi(varargin{i}, 'PointPotential')
         U0 = varargin{i+1};
         validateattributes(U0, {'numeric'}, {'vector', ...
-            'finite', 'real', 'numel', numPoints});
+            'finite', 'real', 'numel', numPoints}, ...
+            'computeTransitionMatrix', 'U0');
         if (size(U0,2) ~= 1), U0 = U0.'; end
     end
     
@@ -97,24 +100,28 @@ for i = 1:length(varargin)
     if strcmpi(varargin{i}, 'DiffusionCoefficient')
         D = varargin{i+1};
         validateattributes(D, {'numeric'}, ...
-            {'scalar', 'positive', 'finite', 'real'});
+            {'scalar', 'positive', 'finite', 'real'}, ...
+            'computeTransitionMatrix', 'D');
     end
     
     if strcmpi(varargin{i}, 'PointDiffusionCoefficient')
         D0 = varargin{i+1};
         validateattributes(D0, {'numeric'}, ...
-            {'scalar', 'positive', 'finite', 'real'});
+            {'scalar', 'positive', 'finite', 'real'}, ...
+            'computeTransitionMatrix', 'D0');
     end
 
     if strcmpi(varargin{i}, 'ClipThreshold')
         clipThreshold = varargin{i+1};
         validateattributes(clipThreshold, {'numeric'}, ...
-            {'scalar', 'nonnegative', 'finite', 'real'});
+            {'scalar', 'nonnegative', 'finite', 'real'}, ...
+            'computeTransitionMatrix', 'clipThreshold');
     end
 
     if strcmpi(varargin{i}, 'StrictNormalization')
         strictNormalization = varargin{i+1};
-        validateattributes(strictNormalization, {'logical'}, {'scalar'});
+        validateattributes(strictNormalization, {'logical'}, {'scalar'}, ...
+            'computeTransitionMatrix', 'strictNormalization');
     end
     
 end
@@ -126,7 +133,8 @@ if ~isempty(scalarMetric)
     if isscalar(scalarMetric)
 
         validateattributes(scalarMetric, {'numeric'}, {'scalar', ...
-            'finite', 'positive', 'real'});
+            'finite', 'positive', 'real'}, ...
+            'computeTransitionMatrix', 'scalarMetric');
 
         U = U ./ scalarMetric;
         scalarMetric = [];
@@ -134,7 +142,8 @@ if ~isempty(scalarMetric)
     else
 
         validateattributes(scalarMetric, {'numeric'}, {'vector', ...
-            'finite', 'positive', 'real', 'numel', numPoints});
+            'finite', 'positive', 'real', 'numel', numPoints}, ...
+            'computeTransitionMatrix', 'scalarMetric');
         if (size(scalarMetric,2) ~= 1)
             scalarMetric = scalarMetric.';
         end

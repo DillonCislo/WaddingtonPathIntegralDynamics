@@ -1,6 +1,6 @@
 function U = interpolatePotentialKHarmonic(X, interpVals, interpIDx, k, varargin)
-%INTERPOLATEPOTENTIAL Interpolate a smooth potential on a set of points by
-%minimizing a k-harmonic energy.
+%INTERPOLATEPOTENTIALKHARMONIC Interpolate a smooth potential on a set of
+%points by minimizing a k-harmonic energy.
 %
 %   INPUT PARAMETERS:
 %
@@ -232,36 +232,10 @@ if removeOutliers
         fprintf('Handling interpolated potential outliers... ');
     end
 
-    rmIDx = find( (U < outlierThreshold(1)) | ...
-        (outlierThreshold(2) < U) );
-
-    [nnIDx, nnDists] = knnsearch(X, X, 'K', numPoints);
-    nnIDx(:, 1) = []; nnDists(:, 1) = [];
-    assert(all(nnDists(:) > 0), 'Input point set contains duplicates');
-
-    for i = 1:numel(rmIDx)
-
-        curID = rmIDx(i); % The current outlier
-
-        % Determine the averaging neighborhood
-        curNNIDx = ~ismember(nnIDx(curID, :), rmIDx);
-        assert(sum(curNNIDx) >= outlierNNSize, ...
-            'Too few neighbors for outlier removal');
-        curNNIDx = find(curNNIDx, outlierNNSize, 'first');
-        curNNDists = nnDists(curID, curNNIDx);
-        curNNIDx = nnIDx(curID, curNNIDx);
-
-        % Averaging weights are proportional to inverse distance to the
-        % outlier
-        rmWeights = (1./curNNDists) ./ sum(1./curNNDists);
-
-        U(curID) = sum(rmWeights .* U(curNNIDx) .');
-
-    end
+    U = removeScalarOutliersFromPointCloud( ...
+        X, U, outlierThreshold, outlierNNSize);
 
     if verbose, fprintf('Done\n'); end
-
-end
 
 end
 

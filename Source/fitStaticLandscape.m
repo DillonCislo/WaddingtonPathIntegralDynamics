@@ -113,6 +113,13 @@ function [optKLDErr, optFixHeights, optScalarMetric, ...
 %       dynamical velocity (i.e. v = -(1/scalarMetric) * \nabla U). If
 %       supplied, this property is held fixed over optimization
 %
+%       - ('PrecomputeQuadProg', precomputeQuadProg = true): Whether or not
+%       to precompute the solver information needed to compute the
+%       interpolated potential. This can help to significantly speed up the
+%       code, but can also lead to OOM error for large problems run in
+%       parallel. *** I THINK MY CODE IS WRITTEN INEFFICIENTLY - HOW ON
+%       EARTH COULD THIS BE OOM-ING THE WORKSTATION? ***
+%
 %       - ('OptimizationOptions', optOptions = {}): A cell array containing
 %       options that can be supplied to a MATLAB 'optimoptions' object to
 %       define solver behavior
@@ -279,6 +286,7 @@ constHeightSum = [];
 simTimeHandling = 'none';
 constFixHeights = nan(numFixPoints, 1);
 constScalarMetric = [];
+precomputeQuadProg = true;
 optOptions = {};
 
 simTimeHandlingOptions = {'none', 'causal', 'constant'};
@@ -322,7 +330,8 @@ supportedOptions = {'InitialConditions', 'NumSimTimes', 'IsSaddle', ...
     'RemoveOutliers', 'OutlierThreshold', 'OutlierNeighbors', ...
     'NormalizeMassMatrix', 'PathLengths', 'PathInterpolationMethod', ...
     'PathCollisionMethod', 'ClipThreshold', 'StrictNormalization', ...
-    'UseGPU', 'InitialGuess', 'EnforcePositiveMetric'};
+    'UseGPU', 'InitialGuess', 'EnforcePositiveMetric', ...
+    'PrecomputeQuadProg'};
 checkSupportedOptions(supportedOptions, varargin);
 
 for i = 1:length(varargin)
@@ -422,6 +431,12 @@ for i = 1:length(varargin)
                 {'scalar', 'positive', 'finite', 'real'}, ...
                 'fitStaticLandscape', 'constScalarMetric');
         end
+    end
+
+    if strcmpi(varargin{i}, 'PrecomputeQuadProg')
+        precomputeQuadProg = varargin{i+1};
+        validateattributes(precomputeQuadProg, {'logical'}, {'scalar'}, ...
+            'fitStaticLandscape', 'precomputeQuadProg');
     end
 
     if strcmpi(varargin{i}, 'OptimizationOptions')
@@ -667,6 +682,8 @@ for i = 1:numDataSets
         
         end
 
+        clear curIC
+
     end
 
 end
@@ -677,7 +694,7 @@ numTotalDataPoints = sum(numDataPointsPerSet);
 % MANIFOLD/POINT SET/POTENTIAL OPTION PROCESSING
 %--------------------------------------------------------------------------
 
-% Estimate point set pseudo potential from point cloud
+% Estimate point set pseudo potential from point cloud---------------------
 if isempty(U0)
     if verbose, disp('Computing point set potential:'); end
     U0 = -D0 * log(gaussianKDE(X, X, [], sqrt(2 * dt), verbose));
@@ -685,13 +702,65 @@ end
 
 if isempty(UB), UB = U0; end
 
-% Validity checks for user-supplied values are performed within
-% 'interpolatePotentialKHarmonic'
+% Check Laplacian/mass matrix ---------------------------------------------
 if (isempty(L) || isempty(M))
 
     if verbose, fprintf('Building Laplacian/mass matrix... '); end
     [L, M] = diffusionMapLaplacian(X, dt);
     if verbose, fprintf('Done\n'); end
+
+else
+
+    validateattributes(L, {'numeric'}, {'2d', 'finite', 'real', ...
+        'ncols', numPoints, 'nrows', numPoints});
+    assert(issymmetric(L), 'Laplacian is not symmetric');
+
+    % Check for positive-definiteness
+    [~, isPD] = chol(L); isPD = isPD == 0;
+    if ~isPD
+        [~, isPD] = chol(-L); isPD = isPD == 0;
+        if isPD
+            L = -L;
+        else
+            error('Laplacian is neither positive nor negative definite');
+        end
+    end
+
+    validateattributes(M, {'numeric'}, {'2d', 'finite', 'real', ...
+        'ncols', numPoints, 'nrows', numPoints});
+    assert(isdiag(M), 'Mass matrix is not diagonal');
+    assert(all(diag(M) > 0), 'Mass matrix contains non-positive masses');
+
+    clear isPD
+
+end
+
+if normalizeMassMatrix, M = M ./ max(abs(diag(M))); end
+
+% Build quadratic coefficients --------------------------------------------
+% We explicitly build the biharmonic operator here.
+% 'interpolatePotentialKHarmonic' would have more flexibility but is
+% generally slower.
+
+Q = L*(M\L);
+if ~issymmetric(Q), Q = (Q + Q.') ./ 2; end % Correct for roundoff error
+if (regSigma > 0), Q = Q + regSigma .* eye(size(Q)); end
+clear L M
+
+% Pre-compute quadratic solver information for constructing the
+% interpolated potential
+if precomputeQuadProg
+
+    fprintf('Pre-computing quadratic solver info\n')
+    [~, tmpKnownIDx] = interpolateValuesAlongPath( ones(numPaths, 2), ...
+        allPaths, 'PathLengths', allPathLengths, ...
+        'InterpolationMethod', pathInterpMethod, ...
+        'CollisionMethod', pathCollisionMethod);
+    F = min_quad_with_fixed_precompute(Q, tmpKnownIDx, []);
+
+else
+
+    F = [];
 
 end
 
@@ -789,6 +858,8 @@ if ~enforceSaddles && ~enforcePositiveMetric && isempty(constHeightSum)
 
     initGuess(~isnan(constrainedValues)) = [];
 
+    clear A b Aeq Beq lb ub
+
 end
 
 %==========================================================================
@@ -842,13 +913,29 @@ optEndPointVals = optFixHeights(fixInPathIDx);
     'InterpolationMethod', pathInterpMethod, ...
     'CollisionMethod', pathCollisionMethod);
 
-% Compute interpolated potential
-optUI = interpolatePotentialKHarmonic(X, optKnownU, optKnownIDx, ...
-    2, 'TikhonovRegularization', regSigma, 'RemoveOutliers', ...
-    removeOutliers, 'OutlierThreshold', outlierThreshold, ...
-    'OutlierNeighbors', outlierNNSize, 'Laplacian', L, ...
-    'MassMatrix', M, 'TimeStep', dt, ...
-    'NormalizeMassMatrix', normalizeMassMatrix);
+% Compute interpolated potential (OLD)
+% optUI = interpolatePotentialKHarmonic(X, optKnownU, optKnownIDx, ...
+%     2, 'TikhonovRegularization', regSigma, 'RemoveOutliers', ...
+%     removeOutliers, 'OutlierThreshold', outlierThreshold, ...
+%     'OutlierNeighbors', outlierNNSize, 'Laplacian', L, ...
+%     'MassMatrix', M, 'TimeStep', dt, ...
+%     'NormalizeMassMatrix', normalizeMassMatrix);
+
+% Compute interpolated potential (FAST)
+optUI = min_quad_with_fixed(Q, zeros(numPoints, 1), ...
+    optKnownIDx, optKnownU, [], [], F);
+
+% Handle interpolated potential outliers
+if removeOutliers
+    if isempty(outlierThreshold)
+        optOutlierThreshold = [min(optKnownU), max(optKnownU)] + ...
+            1e-14 * [-1 1];
+    else
+        optOutlierThreshold = outlierThreshold;
+    end
+    optUI = removeScalarOutliersFromPointCloud( ...
+        X, optUI, optOutlierThreshold, outlierNNSize);
+end
 
 optU = UB + optUI; % Combine to compute dynamical potential
 
@@ -937,13 +1024,29 @@ if verbose, fprintf('Done\n'); end
             'InterpolationMethod', pathInterpMethod, ...
             'CollisionMethod', pathCollisionMethod);
 
-        % Compute interpolated potential
-        UI = interpolatePotentialKHarmonic(X, knownU, knownIDx, ...
-            2, 'TikhonovRegularization', regSigma, 'RemoveOutliers', ...
-            removeOutliers, 'OutlierThreshold', outlierThreshold, ...
-            'OutlierNeighbors', outlierNNSize, 'Laplacian', L, ...
-            'MassMatrix', M, 'TimeStep', dt, ...
-            'NormalizeMassMatrix', normalizeMassMatrix);
+        % Compute interpolated potential (OLD)
+        % UI = interpolatePotentialKHarmonic(X, knownU, knownIDx, ...
+        %     2, 'TikhonovRegularization', regSigma, 'RemoveOutliers', ...
+        %     removeOutliers, 'OutlierThreshold', outlierThreshold, ...
+        %     'OutlierNeighbors', outlierNNSize, 'Laplacian', L, ...
+        %     'MassMatrix', M, 'TimeStep', dt, ...
+        %     'NormalizeMassMatrix', normalizeMassMatrix);
+
+        % Compute interpolated potential (FAST)
+        UI = min_quad_with_fixed(Q, zeros(numPoints, 1), ...
+            knownIDx, knownU, [], [], F);
+
+        % Handle interpolated potential outliers
+        if removeOutliers
+            if isempty(outlierThreshold)
+                curOutlierThreshold = [min(knownU), max(knownU)] + ...
+                    1e-14 * [-1 1];
+            else
+                curOutlierThreshold = outlierThreshold;
+            end
+            UI = removeScalarOutliersFromPointCloud( ...
+                X, UI, curOutlierThreshold, outlierNNSize);
+        end
 
         U = UB + UI; % Combine to compute dynamical potential
 
@@ -1023,13 +1126,29 @@ if verbose, fprintf('Done\n'); end
             'InterpolationMethod', pathInterpMethod, ...
             'CollisionMethod', pathCollisionMethod);
 
-        % Compute interpolated potential
-        UI = interpolatePotentialKHarmonic(X, knownU, knownIDx, ...
-            2, 'TikhonovRegularization', regSigma, 'RemoveOutliers', ...
-            removeOutliers, 'OutlierThreshold', outlierThreshold, ...
-            'OutlierNeighbors', outlierNNSize, 'Laplacian', L, ...
-            'MassMatrix', M, 'TimeStep', dt, ...
-            'NormalizeMassMatrix', normalizeMassMatrix);
+        % Compute interpolated potential (OLD)
+        % UI = interpolatePotentialKHarmonic(X, knownU, knownIDx, ...
+        %     2, 'TikhonovRegularization', regSigma, 'RemoveOutliers', ...
+        %     removeOutliers, 'OutlierThreshold', outlierThreshold, ...
+        %     'OutlierNeighbors', outlierNNSize, 'Laplacian', L, ...
+        %     'MassMatrix', M, 'TimeStep', dt, ...
+        %     'NormalizeMassMatrix', normalizeMassMatrix);
+
+        % Compute interpolated potential (FAST)
+        UI = min_quad_with_fixed(Q, zeros(numPoints, 1), ...
+            knownIDx, knownU, [], [], F);
+
+        % Handle interpolated potential outliers
+        if removeOutliers
+            if isempty(outlierThreshold)
+                curOutlierThreshold = [min(knownU), max(knownU)] + ...
+                    1e-14 * [-1 1];
+            else
+                curOutlierThreshold = outlierThreshold;
+            end
+            UI = removeScalarOutliersFromPointCloud( ...
+                X, UI, curOutlierThreshold, outlierNNSize);
+        end
 
         U = UB + UI; % Combine to compute dynamical potential
 
