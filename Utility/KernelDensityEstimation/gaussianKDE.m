@@ -16,10 +16,12 @@ function pointDensity = ...
 %   INPUT PARAMETERS:
 %
 %       - P:    #NP x #D input point cloud defining the kernel density
-%               estimator
+%               estimator -OR- a two-element vector with P(1) == #NP and
+%               P(2) == #D
 %
 %       - Q:    #NQ x #D query point cloud specifying the locations at
-%               which the density is evaluated
+%               which the density is evaluated -OR- a two element vector
+%               with Q(1) = #NQ and Q(2) == #D
 %
 %       - covK: #D x #D covariance matrix for the Gaussian kernel
 %
@@ -52,21 +54,35 @@ if ((nargin < 2) || isempty(Q)), Q = P; end
 if ((nargin < 3) || isempty(covK)), covK = 1; end
 if ((nargin < 4) || isempty(bwK)), bwK = 1; end
 if ((nargin < 5) || isempty(verbose)), verbose = false; end
-if ((nargin < 6) || isempty(weights))
-    weights = ones(size(P,1), 1) ./ size(P,1);
-end
+if (nargin < 6), weights = []; end
 if (nargin < 7), distMatrix = []; end
 if (nargin < 8), useGPU = true; end
 
 % Process input data point cloud
-validateattributes(P, {'numeric'}, {'2d', 'finite', 'real'});
-numDataPoints = size(P,1); dim = size(P,2);
+if (numel(P) == 2)
+    numDataPoints = P(1); dim = P(2);
+    validateattributes(numDataPoints, {'numeric'}, {'integer', ...
+        'scalar', 'positive', 'finite', 'real'});
+    validateattributes(dim, {'numeric'}, {'integer', ...
+        'scalar', 'positive', 'finite', 'real'});
+else
+    validateattributes(P, {'numeric'}, {'2d', 'finite', 'real'});
+    numDataPoints = size(P,1); dim = size(P,2);
+end
 
 % Process input query point cloud
-validateattributes(Q, {'numeric'}, {'2d', 'finite', 'real'});
-numQueryPoints = size(Q,1);
-assert(size(Q,2) == dim, ['Dimensionality of query points must match ' ...
-    'dimensionality of data points']);
+if (numel(Q) == 2)
+    numQueryPoints = Q(1);
+    assert(Q(2) == dim, ['Dimensionality of query points must match ' ...
+        'dimensionality of data points']);
+    validateattributes(numQueryPoints, {'numeric'}, {'integer', ...
+        'scalar', 'positive', 'finite', 'real'});
+else
+    validateattributes(Q, {'numeric'}, {'2d', 'finite', 'real'});
+    numQueryPoints = size(Q,1);
+    assert(size(Q,2) == dim, ['Dimensionality of query points must ' ...
+        'match dimensionality of data points']);
+end
 
 % Process input covariance
 validateattributes(covK, {'numeric'}, {'finite', 'real'});
@@ -126,10 +142,14 @@ assert(detBW ~= 0, 'Bandwidth matrix must be nonsingular');
 validateattributes(verbose, {'logical'}, {'scalar'});
 
 % Validate input weights
-validateattributes(weights, {'numeric'}, {'vector', 'nonnegative', ...
-    'finite', 'real', 'numel', numDataPoints});
-if (size(weights, 1) ~= 1), weights = weights.'; end
-weights = weights ./ sum(weights); % Normalize just in case
+if ~isempty(weights)
+    validateattributes(weights, {'numeric'}, {'vector', 'nonnegative', ...
+        'finite', 'real', 'numel', numDataPoints});
+    if (size(weights, 1) ~= 1), weights = weights.'; end
+    weights = weights ./ sum(weights); % Normalize just in case
+else
+    weights = ones(1, numDataPoints) ./ numDataPoints;
+end
 
 % Validate distance matrix
 useDistMatrix = false;
