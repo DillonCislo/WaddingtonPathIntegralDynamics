@@ -8,6 +8,9 @@ function [K, nnDists, nnIDx, sigmaOut] = affinityMatrix(X, affinityOptions)
 %
 %   OPTIONAL INPUTS (Name, Value)-Pairs:
 %
+%       - ('DistanceMatrix', distMatrix = []): A #N x #N (or #N x k)
+%       precomputed distance matrix for the points in X
+%
 %       - ('DistanceType', distType = 'euclidean'): The metric used to
 %       calculate the raw pair-wise distances between data points. See
 %       documentation for 'knnsearch'.
@@ -37,10 +40,10 @@ function [K, nnDists, nnIDx, sigmaOut] = affinityMatrix(X, affinityOptions)
 %
 %       - K:            #X x #X symmetric affinity matrix
 %
-%       - nnDists:      k x #X list of kNN nearest neighbor distances for
+%       - nnDists:      #X x k list of kNN nearest neighbor distances for
 %                       each input point
 %
-%       - nnIDx:        k x #X list of data point IDs corresponding to the
+%       - nnIDx:        #X x k list of data point IDs corresponding to the
 %                       distances in nnDists
 %
 %       - sigmaOut:     The bandwidth of the affinit matrix kernel. If a
@@ -56,8 +59,12 @@ function [K, nnDists, nnIDx, sigmaOut] = affinityMatrix(X, affinityOptions)
 %--------------------------------------------------------------------------
 % INPUT PROCESSING
 %--------------------------------------------------------------------------
-validateattributes(X, {'numeric'}, {'2d', 'finite', 'real'});
-numPoints = size(X,1); % dims = size(X,2);
+if ~isempty(X)
+    validateattributes(X, {'numeric'}, {'2d', 'finite', 'real'});
+    numPoints = size(X,1); % dims = size(X,2);
+else
+    numPoints = -1;
+end
 
 if (nargin < 2), affinityOptions = struct(); end
 assert(isstruct(affinityOptions), ...
@@ -77,6 +84,23 @@ else
     distType = 'euclidean';
 end
 
+if isfield(affinityOptions, 'distancematrix')
+    distMatrix = affinityOptions.distancematrix;
+    if ~isempty(distMatrix)
+        validateattributes(distMatrix, {'numeric'}, {'2d', ...
+            'nonnegative', 'finite', 'real', 'square'});
+        if (numPoints > 0)
+            assert(isequal(size(distMatrix), numPoints * [1 1]), ...
+                'Distance matrix is improperly sized');
+        else
+            numPoints = size(distMatrix,1);
+        end
+    end
+    affinityOptions = rmfield(affinityOptions, 'distancematrix');
+else
+    distMatrix = [];
+end
+    
 if isfield(affinityOptions, 'numneighbors')
     kNN = affinityOptions.numneighbors;
     validateattributes(kNN, {'numeric'}, ...
@@ -130,13 +154,28 @@ assert(isempty(fieldnames(affinityOptions)), ...
 %--------------------------------------------------------------------------
 
 % Calculate pair-wise distances between points
-% NOTE: Output is (numPoints) x (kNN)
 if verbose, tic; end
-[nnIDx, nnDists] = knnsearch(X, X, 'K', kNN, ...
-    'SortIndices', true, 'Distance', distType);
+if isempty(distMatrix)
+    
+    assert(~isempty(X), ['Please supply either an input point set ' ...
+        'or a pre-computed distance matrix']);
+    
+    % NOTE: Output is (numPoints) x (kNN)
+    [nnIDx, nnDists] = knnsearch(X, X, 'K', kNN, ...
+        'SortIndices', true, 'Distance', distType);
+    assert(isequal(size(nnDists), [numPoints, kNN]), ...
+        'Invalid distance output size');
+    
+else
+    
+    nnIDx = zeros(numPoints, kNN);
+    nnDists = zeros(numPoints, kNN);
+    for i = 1:numPoints
+        [nnDists(i,:), nnIDx(i,:)] = mink(distMatrix(i,:), kNN);
+    end
+    
+end
 if verbose, toc; end
-assert(isequal(size(nnDists), [numPoints, kNN]), ...
-    'Invalid distance output size');
 
 % Generate the index/value structure for the sparse matrix output
 rowIDx = repmat((1:numPoints).', 1, kNN); rowIDx = rowIDx(:);
