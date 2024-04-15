@@ -45,6 +45,13 @@ function T = computeTransitionMatrix(X, U, dt, varargin)
 %       - ('StrictNormalization', strictNormalization = true): Whether or
 %       not to distribute round-off error in the column-wise normalization.
 %
+%       - ('DistanceMatrix', distMatrix = []): #N x #N pairwise distance
+%       matrix, i.e. distMatirx(i,j) is the distance between cell i and
+%       cell j.
+%
+%       - ('UseGPU', useGPU = true): Whether or not to perform computations
+%       on a GPU
+%
 %   OUTPUT PARAMETERS:
 %
 %       - T:    #N x #N (left Markov) transition matrix
@@ -54,13 +61,22 @@ function T = computeTransitionMatrix(X, U, dt, varargin)
 %--------------------------------------------------------------------------
 % INPUT PROCESSING
 %--------------------------------------------------------------------------
-validateattributes(X, {'numeric'}, {'2d', 'finite', 'real'}, ...
-    'computeTransitionMatrix', 'X');
-numPoints = size(X,1); % dim = size(X,2);
+if ~isempty(X)
+    validateattributes(X, {'numeric'}, {'2d', 'finite', 'real'}, ...
+        'computeTransitionMatrix', 'X');
+    numPoints = size(X,1); % dim = size(X,2);
+else
+    numPoints = -1;
+end
 
-validateattributes(U, {'numeric'}, {'vector', 'finite', 'real', ...
-    'numel', numPoints}, 'computeTransitionMatrix', 'U');
+validateattributes(U, {'numeric'}, {'vector', 'finite', 'real'}, ...
+    'computeTransitionMatrix', 'U');
 if (size(U,2) ~= 1), U = U.'; end
+if (numPoints > 0)
+    assert(numel(U) == numPoints, 'Scalar potential is improperly sized');
+else
+    numPoints = numel(U);
+end
 
 validateattributes(dt, {'numeric'}, ...
     {'scalar', 'positive', 'finite', 'real'}, ...
@@ -74,10 +90,13 @@ D = 1;
 D0 = 1;
 clipThreshold = 0;
 strictNormalization = true;
+distMatrix = [];
+useGPU = true;
 
 supportedOptions = {'PointPotential', 'ScalarMetric', ...
     'DiffusionCoefficient', 'PointDiffusionCoefficient', ...
-    'ClipThreshold', 'StrictNormalization'};
+    'ClipThreshold', 'StrictNormalization', 'DistanceMatrix', ...
+    'UseGPU'};
 checkSupportedOptions(supportedOptions, varargin);
 
 for i = 1:length(varargin)
@@ -124,6 +143,22 @@ for i = 1:length(varargin)
             'computeTransitionMatrix', 'strictNormalization');
     end
     
+    if strcmpi(varargin{i}, 'DistanceMatrix')
+        distMatrix = varargin{i+1};
+        if ~isempty(distMatrix)
+            validateattributes(distMatrix, {'numeric'}, {'2d', ...
+                'nonnegative', 'finite', 'real', ...
+                'ncols', numPoints, 'nrows', numPoints}, ...
+                'computeTransitionMatrix', 'distMatrix')
+        end
+    end
+    
+    if strcmpi(varargin{i}, 'UseGPU')
+        useGPU = varargin{i+1};
+        validateattributes(useGPU, {'logical'}, {'scalar'}, ...
+            'computeTransitionMatrix', 'useGPU');
+    end
+    
 end
 
 if ~isempty(scalarMetric)
@@ -152,13 +187,27 @@ if ~isempty(scalarMetric)
 
 end
 
+if useGPU, try gpuDevice; catch, useGPU = false; end; end
+
 %--------------------------------------------------------------------------
 % COMPUTE TRANSITION MATRIX
 %--------------------------------------------------------------------------
+if useGPU
+    X = gpuArray(X);
+    U = gpuArray(U);
+    U0 = gpuArray(U0);
+    distMatrix = gpuArray(distMatrix);
+    scalarMetric = gpuArray(scalarMetric);
+end
+    
 
 % Fast computation of squared Euclidean distances
-T = X * X.';
-T = -(diag(T) + diag(T).' - 2 .* T) ./ (4 * D * dt);
+if isempty(distMatrix)
+    T = X * X.';
+    T = -(diag(T) + diag(T).' - 2 .* T) ./ (4 * D * dt);
+else
+    T = -distMatrix.^2 ./ (4 * D * dt);
+end
 
 if isempty(scalarMetric)
     
@@ -205,5 +254,7 @@ if strictNormalization
 end
 
 assert(~any(T(:) < 0), 'Negative transition probabilities on output');
+
+T = gather(T);
     
 end

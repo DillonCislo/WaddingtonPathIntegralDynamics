@@ -126,7 +126,7 @@ end
 if isfield(mapOptions, 'symmetrizetransitionoperator')
     symmetrizeMB = mapOptions.symmetrizetransitionoperator;
     validateattributes(symmetrizeMB, {'logical'}, {'scalar'});
-    mapOptions = rmfield(mapOptions, 'symmetrizelaplacian');
+    mapOptions = rmfield(mapOptions, 'symmetrizetransitionoperator');
 else
     symmetrizeMB = false;
 end
