@@ -837,6 +837,7 @@ end
 % Set bound constraints ---------------------------------------------------
 
 if enforcePositiveMetric
+    if verbose, disp('Enforcing positive metric'); end
     lb = [-inf(numFixPoints, 1); 1e-12];
 else
     lb = -inf(numFixPoints+1, 1);
