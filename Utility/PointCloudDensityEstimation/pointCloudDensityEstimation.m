@@ -681,7 +681,7 @@ if verbose, fprintf('Done\n'); end
 if verbose, fprintf('Calculating branch quality metrics... '); end
 
 % A sorted list (low to high) of the unique roots for each branch
-branchID = unique(branchIDx); 
+branchID = unique(branchIDx);
 numBranches = numel(branchID);
 
 % Calculate branch persistence and stability
@@ -689,14 +689,14 @@ branchStability = zeros(numBranches, 1);
 maxDensity = zeros(numBranches, 1);
 minDensity = zeros(numBranches, 1);
 for i = 1:numBranches
-    
+
     curBranchDensity = density(branchIDx == branchID(i));
-    
+
     maxDensity(i) = max(curBranchDensity);
     minDensity(i) = min(curBranchDensity);
-    
+
     branchStability(i) = sum(curBranchDensity);
-    
+
 end
 
 branchPersistence = maxDensity - minDensity;
@@ -715,112 +715,121 @@ rmIDx = rmIDx | (maxDensity < maxThreshold);
 % Prune Branches Based on Spatial Proximity
 %--------------------------------------------------------------------------
 
-if strcmpi(collisionMergeMethod, 'sequential')
-    
-    activeBranchIDx = branchID(~rmIDx);
-    [nnIDx, nnDists] = knnsearch( X(activeBranchIDx, :), ...
-        X(activeBranchIDx, :), 'k', 2 );
-    nnDists = nnDists(:,2);
-    
-    while any(nnDists < distThreshold)
-        
-        % Determine the branch IDs of the current closest pair within the
-        % distance threshold
-        minDistPairIDx = [0 0];
-        [~, minDistPairIDx(1)] = min(nnDists);
-        minDistPairIDx(2) = nnIDx(minDistPairIDx(1));
-        minDistPairIDx = activeBranchIDx(minDistPairIDx);
-        
-        % Keep only the element of the pair with the maximum density
-        rmIDx(branchID == min(minDistPairIDx)) = true;
-        
-        % Update the nearest neighbor distance list
+if (numel(branchIDx(~rmIDx)) > 1)
+
+    if strcmpi(collisionMergeMethod, 'sequential')
+
         activeBranchIDx = branchID(~rmIDx);
         [nnIDx, nnDists] = knnsearch( X(activeBranchIDx, :), ...
             X(activeBranchIDx, :), 'k', 2 );
         nnDists = nnDists(:,2);
 
-    end
-    
-    % TODO: Incorporate collision zones in to quality visualization *******
-    trueBranchCollisions = [];
-    
-elseif strcmpi(collisionMergeMethod, 'simultaneous')
-    
-    % Find the number of r-neighborhood collisions, i.e all density maxima
-    % that are closer than the distance threshold to the current maximum.
-    % NOTE: Includes the self-collision
-    allBranchCollisions = ...
-        rangesearch(X(branchID, :), X(branchID, :), distThreshold);
-    allBranchCollisions = cellfun(@(x) branchID(x.'), ...
-        allBranchCollisions, 'Uni', false);
-    
-    % Remove cells correspoding to branches with no collisions (i.e. the
-    % cell contains only the self-collision)
-    allBranchCollisions(cellfun(@(x) numel(x) == 1, ...
-        allBranchCollisions, 'Uni', true)) = [];
-    
-    if ~isempty(allBranchCollisions)
-        
-        % Determine which collision neighborhoods intersect
-        numCollisions = numel(allBranchCollisions);
-        collisionEdges = nan(numCollisions * (numCollisions-1) / 2, 2);
-        count = 1;
-        for i = 1:numCollisions
-            for j = (i+1):numCollisions
-                if ~isempty(intersect(allBranchCollisions{i}, ...
-                        allBranchCollisions{j}))
-                    collisionEdges(count, :) = [i j];
-                end
-                count = count+1;
-            end
+        while any(nnDists < distThreshold)
+
+            % Determine the branch IDs of the current closest pair within
+            % the distance threshold
+            minDistPairIDx = [0 0];
+            [~, minDistPairIDx(1)] = min(nnDists);
+            minDistPairIDx(2) = nnIDx(minDistPairIDx(1));
+            minDistPairIDx = activeBranchIDx(minDistPairIDx);
+
+            % Keep only the element of the pair with the maximum density
+            rmIDx(branchID == min(minDistPairIDx)) = true;
+
+            % Update the nearest neighbor distance list
+            activeBranchIDx = branchID(~rmIDx);
+            [nnIDx, nnDists] = knnsearch( X(activeBranchIDx, :), ...
+                X(activeBranchIDx, :), 'k', 2 );
+            nnDists = nnDists(:,2);
+
         end
-        assert(count == (size(collisionEdges,1)+1), ...
-            'Bad collision pair counting');
-        collisionEdges(any(isnan(collisionEdges), 2), :) = [];
-        
-        % Establish connected components over intersecting regions
-        [numIntRegions, intRegionIDx] = ...
-            graphConnectedComponents(collisionEdges, numCollisions);
-        
-        % Merge connected components of intersecting regions
-        trueBranchCollisions = cell(numIntRegions, 1);
-        rmCollIDx = false(numBranches, 1);
-        for i = 1:numIntRegions
-            
-            % Determine all unique points in the current merged collision
-            % zone
-            curCollisions = allBranchCollisions(intRegionIDx == i);
-            curCollisions = unique(vertcat(curCollisions{:}));
-            trueBranchCollisions{i} = curCollisions;
-            
-            % Remove all points from consideration that have already been
-            % removed according to the previous topological quality
-            % measures
-            curCollisions(ismember(curCollisions, branchID(rmIDx))) = [];
-            
-            % Tag all points except the highest remaining maximium to be
-            % removed
-            if ~isempty(curCollisions)
-                curCollisions(curCollisions == max(curCollisions)) = [];
-                rmCollIDx(ismember(branchID, curCollisions)) = true;
-            end
-            
-        end
-        
-        rmIDx = rmIDx | rmCollIDx;
-        
-    else
-        
+
         % TODO: Incorporate collision zones in to quality visualization ***
         trueBranchCollisions = [];
-        
+
+    elseif strcmpi(collisionMergeMethod, 'simultaneous')
+
+        % Find the number of r-neighborhood collisions, i.e all density
+        % maxima that are closer than the distance threshold to the current
+        % maximum. NOTE: Includes the self-collision
+        allBranchCollisions = ...
+            rangesearch(X(branchID, :), X(branchID, :), distThreshold);
+        allBranchCollisions = cellfun(@(x) branchID(x.'), ...
+            allBranchCollisions, 'Uni', false);
+
+        % Remove cells correspoding to branches with no collisions (i.e.
+        % the cell contains only the self-collision)
+        allBranchCollisions(cellfun(@(x) numel(x) == 1, ...
+            allBranchCollisions, 'Uni', true)) = [];
+
+        if ~isempty(allBranchCollisions)
+
+            % Determine which collision neighborhoods intersect
+            numCollisions = numel(allBranchCollisions);
+            collisionEdges = nan(numCollisions * (numCollisions-1) / 2, 2);
+            count = 1;
+            for i = 1:numCollisions
+                for j = (i+1):numCollisions
+                    if ~isempty(intersect(allBranchCollisions{i}, ...
+                            allBranchCollisions{j}))
+                        collisionEdges(count, :) = [i j];
+                    end
+                    count = count+1;
+                end
+            end
+            assert(count == (size(collisionEdges,1)+1), ...
+                'Bad collision pair counting');
+            collisionEdges(any(isnan(collisionEdges), 2), :) = [];
+
+            % Establish connected components over intersecting regions
+            [numIntRegions, intRegionIDx] = ...
+                graphConnectedComponents(collisionEdges, numCollisions);
+
+            % Merge connected components of intersecting regions
+            trueBranchCollisions = cell(numIntRegions, 1);
+            rmCollIDx = false(numBranches, 1);
+            for i = 1:numIntRegions
+
+                % Determine all unique points in the current merged
+                % collision zone
+                curCollisions = allBranchCollisions(intRegionIDx == i);
+                curCollisions = unique(vertcat(curCollisions{:}));
+                trueBranchCollisions{i} = curCollisions;
+
+                % Remove all points from consideration that have already
+                % been removed according to the previous topological
+                % quality measures
+                curCollisions(ismember(curCollisions, branchID(rmIDx))) = [];
+
+                % Tag all points except the highest remaining maximium to
+                % be removed
+                if ~isempty(curCollisions)
+                    curCollisions(curCollisions == max(curCollisions)) = [];
+                    rmCollIDx(ismember(branchID, curCollisions)) = true;
+                end
+
+            end
+
+            rmIDx = rmIDx | rmCollIDx;
+
+        else
+
+            % TODO: Incorporate collision zones in to quality visualization
+            trueBranchCollisions = [];
+
+        end
+
+    else
+
+        error('Invalid collision merge method');
+
     end
-    
+
 else
-    
-    error('Invalid collision merge method');
-    
+
+    % TODO: Incorporate collision zones in to quality visualization *******
+    trueBranchCollisions = [];
+
 end
 
 %--------------------------------------------------------------------------

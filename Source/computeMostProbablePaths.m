@@ -1,17 +1,22 @@
 function [allPaths, allPathWeights, allPathLengths] = ...
-    computeMostProbablePaths(X, T, pairIDx)
+    computeMostProbablePaths(X, T, pairIDx, distMatrix)
 %COMPUTEMOSTPROBABLEPATHS Computes the most probable paths between pairs of
 %points given a (right Markov) transition matrix defined on those points
 %
 %   INPUT PARAMETERS:
 %
-%       - X:        #X x dim list of input points
+%       - X:            #N x dim list of input points
 %
-%       - T:        #N x #N (right Markov) transition matrix . The value of
-%                   T(i,j) is the probability of transitioning from j->i.
-%                   The columns of T should be normalized (sum(T,1) == 1)
+%       - T:            #N x #N (right Markov) transition matrix. The value
+%                       of T(i,j) is the probability of transitioning from
+%                       j->i. The columns of T should be normalized
+%                       (sum(T,1) == 1)
 %
-%       - pairIDx:  #Px2 matrix of start/end point pair IDs
+%       - pairIDx:      #Px2 matrix of start/end point pair IDs
+%
+%       - distMatrix:   #N x #N pairwise distance matrix, i.e.
+%                       distMatrix(i,j) is the distance between cell i and
+%                       cell j
 %
 % 	OUTPUT PARAMETERS:
 %
@@ -36,8 +41,28 @@ function [allPaths, allPathWeights, allPathLengths] = ...
 %--------------------------------------------------------------------------
 % INPUT PROCESSING
 %--------------------------------------------------------------------------
-validateattributes(X, {'numeric'}, {'2d', 'finite', 'real'});
-numPoints = size(X,1); % dim = size(X,2);
+if (nargin < 4), distMatrix = []; end
+
+if ~isempty(X)
+    validateattributes(X, {'numeric'}, {'2d', 'finite', 'real'});
+    numPoints = size(X,1); % dim = size(X,2);
+else
+    numPoints = -1;
+end
+
+if ~isempty(distMatrix)
+    validateattributes(distMatrix, {'numeric'}, {'2d', ...
+        'finite', 'real', 'nonnegative', 'square'});
+    if (numPoints > 0)
+        assert(size(distMatrix,1) == numPoints, ['Distance matrix ' ...
+            'is improperly sized']);
+    else
+        numPoints = size(distMatrix,1);
+    end
+end
+
+assert(~(isempty(X) && isempty(distMatrix)), ['You must supply ' ...
+    'either a complete input point set or a distance matrix']);
 
 validateattributes(T, {'numeric'}, {'2d', 'finite', 'real', ...
     'nrows', numPoints, 'ncols', numPoints})
@@ -74,9 +99,14 @@ for i = 1:numPairs
         end
         allPathWeights{i} = curPathWeights;
     end
-    
-    curPathLengths = X(curPath(:,2), :) - X(curPath(:,1), :);
-    curPathLengths = sqrt(sum(curPathLengths.^2, 2));
+
+    if isempty(distMatrix)
+        curPathLengths = X(curPath(:,2), :) - X(curPath(:,1), :);
+        curPathLengths = sqrt(sum(curPathLengths.^2, 2));
+    else
+        dmIDx = sub2ind(size(distMatrix), curPath(:,2), curPath(:,1));
+        curPathLengths = distMatrix(dmIDx);
+    end
     curPathLengths = [0; cumsum(curPathLengths)];
     allPathLengths{i} = curPathLengths;
     

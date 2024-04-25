@@ -9,7 +9,8 @@ function [allScalarUniErr, allGroundStateEigs, allU0, allIsReducible] = ...
 %
 %   INPUT PARAMETERS:
 %
-%       - X:    #N x dim set of input points
+%       - X:            #N x dim set of input points -OR- a two element
+%                       vector with X(1) == #N and X(2) = dim
 %
 %       - allTimeSteps:	1 x #T vector of candidate short time steps over
 %                       which the transition matrix approximates the
@@ -41,6 +42,16 @@ function [allScalarUniErr, allGroundStateEigs, allU0, allIsReducible] = ...
 %       iteration to an ensemble of a user specified size and report
 %       ensemble averages
 %
+%       - ('DistanceMatrix', distMatrix = []): #N x #N pairwise distance
+%       matrix, i.e. distMatrix(i,j) is the distance between cell i and
+%       cell j
+%
+%       - ('FixedPotential', U0 = []): #N x 1 scalar potential defined on
+%       the input points. If this field is supplied, the potential is held
+%       fixed over all time steps. If not, the potential is recalculated at
+%       each iteration, using the currrent time step as a bandwidth for
+%       density estimation
+%
 %       - ('Verbose', verbose = false): Whether or not to produce verbose
 %       progress output
 %
@@ -70,8 +81,16 @@ function [allScalarUniErr, allGroundStateEigs, allU0, allIsReducible] = ...
 %--------------------------------------------------------------------------
 % INPUT PROCESSING
 %--------------------------------------------------------------------------
-validateattributes(X, {'numeric'}, {'2d', 'finite', 'real'});
-numPoints = size(X,1); % dim = size(X,2);
+if (numel(X) == 2)
+    numPoints = X(1); dim = X(2);
+    validateattributes(numPoints, {'numeric'}, {'integer', ...
+        'scalar', 'positive', 'finite', 'real'});
+    validateattributes(dim, {'numeric'}, {'integer', ...
+        'scalar', 'positive', 'finite', 'real'});
+else
+    validateattributes(X, {'numeric'}, {'2d', 'finite', 'real'});
+    numPoints = size(X,1); % dim = size(X,2);
+end
 
 validateattributes(allTimeSteps, {'numeric'}, ...
     {'vector', 'positive', 'finite', 'real'});
@@ -86,11 +105,14 @@ maxIter = 300;
 maxIterSet = false;
 tol = 1e-14;
 ensembleSize = 1;
+distMatrix = [];
 verbose = false;
+fixU0 = [];
 
 supportedOptions = {'DiffusionCoefficient', ...
     'PointDiffusionCoefficient', 'UseGPU', 'MaxIterations', ...
-    'Tolerance', 'EnsembleSize', 'Verbose'};
+    'Tolerance', 'EnsembleSize', 'Verbose', 'DistanceMatrix', ...
+    'FixedPotential'};
 checkSupportedOptions(supportedOptions, varargin);
 
 for i = 1:length(varargin)
@@ -133,7 +155,26 @@ for i = 1:length(varargin)
         validateattributes(ensembleSize, {'numeric'}, ...
             {'scalar', 'integer', 'finite', 'positive', 'real'});
     end
-    
+
+    if strcmpi(varargin{i}, 'DistanceMatrix')
+        distMatrix = varargin{i+1};
+        if ~isempty(distMatrix)
+            validateattributes(distMatrix, {'numeric'}, {'2d', ...
+                'finite', 'real', 'nonnegative', 'square'});
+            assert(size(distMatrix,1) == numPoints, ...
+                'Distance matrix is improperly sized');
+        end
+    end
+
+    if strcmpi(varargin{i}, 'FixedPotential')
+        fixU0 = varargin{i+1};
+        if ~isempty(fixU0)
+            validateattributes(fixU0, {'numeric'}, {'vector', ...
+                'finite', 'real', 'numel', numPoints});
+            if (size(fixU0, 2) ~= 1), fixU0 = fixU0.'; end
+        end
+    end
+
     if strcmpi(varargin{i}, 'Verbose')
         verbose = varargin{i+1};
         validateattributes(verbose, {'logical'}, {'scalar'});
@@ -151,6 +192,8 @@ if useGPU
     end
 end
 
+assert(~((numel(X) == 2) && isempty(distMatrix)), ['You have to supply ' ...
+    'either a complete input point set or a distance matrix']);
 
 %--------------------------------------------------------------------------
 % SCAN GROUND STATE UNIFORMITY ACROSS TIME STEPS
@@ -177,23 +220,41 @@ for n = 1:numel(allTimeSteps)
     
     % Estimate Density From Point Cloud -----------------------------------
     
-    if verbose
-       disp('Performing kernel density estimation: ');
+    if isempty(fixU0)
+
+        if verbose
+            disp('Performing kernel density estimation: ');
+        end
+
+        curDensity = gaussianKDE(X, X, [], ...
+            sqrt(2 * D * allTimeSteps(n)), verbose, [], ...
+            distMatrix, useGPU);
+
+        U0 = -D0 * log(curDensity);
+
+    else
+
+        U0 = fixU0;
+
     end
-    
-    curDensity = gaussianKDE(X, X, [], ...
-        sqrt(2 * D * allTimeSteps(n)), verbose);
-    
-    U0 = -D0 * log(curDensity);
+
     allU0(:, n) = U0;
     
     % Construct Fokker-Planck Transition Matrix ---------------------------
     
     if verbose, fprintf('Constructing transition matrix... '); end
-    
-    T = computeTransitionMatrix(X, U0, allTimeSteps(n), ...
-        'DiffusionCoefficient', D, 'PointDiffusionCoefficient', D0, ...
-        'ClipThreshold', 1e-14, 'StrictNormalization', true);
+
+    if (numel(X) == 2)
+        T = computeTransitionMatrix([], U0, allTimeSteps(n), ...
+            'DiffusionCoefficient', D, 'PointDiffusionCoefficient', D0, ...
+            'ClipThreshold', 1e-14, 'StrictNormalization', true, ...
+            'UseGPU', useGPU, 'DistanceMatrix', distMatrix);
+    else
+        T = computeTransitionMatrix(X, U0, allTimeSteps(n), ...
+            'DiffusionCoefficient', D, 'PointDiffusionCoefficient', D0, ...
+            'ClipThreshold', 1e-14, 'StrictNormalization', true, ...
+            'UseGPU', useGPU);
+    end
     
     if verbose, fprintf('Done\n'); end
 
@@ -201,8 +262,8 @@ for n = 1:numel(allTimeSteps)
     G = T;
     G(G(:) < zeroTol) = 0;
     G = digraph(G);
-    distMatrix = distances(G, 'Method', 'unweighted');
-    allIsReducible(n) = any(isinf(distMatrix(:)));
+    graphDistMatrix = distances(G, 'Method', 'unweighted');
+    allIsReducible(n) = any(isinf(graphDistMatrix(:)));
 
     if verbose
         if allIsReducible(n)

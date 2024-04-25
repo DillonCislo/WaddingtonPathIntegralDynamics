@@ -189,6 +189,9 @@ end
 
 if useGPU, try gpuDevice; catch, useGPU = false; end; end
 
+assert(~(isempty(X) && isempty(distMatrix)), ['You have to supply ' ...
+    'either a complete input point set or a distance matrix']);
+
 %--------------------------------------------------------------------------
 % COMPUTE TRANSITION MATRIX
 %--------------------------------------------------------------------------

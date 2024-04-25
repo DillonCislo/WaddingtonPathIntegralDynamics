@@ -1,5 +1,5 @@
 function [allPaths, allPathLengths, allPathWeights] = ...
-    splitPathsAtIDx(oldPaths, splitIDx, X, T)
+    splitPathsAtIDx(oldPaths, splitIDx, X, T, distMatrix)
 %SPLITPATHSATIDX Splits a set of paths (definied by an ordered list of
 %point IDs) at a specified index (this is an index into the path NOT the
 %point clout). Recomputes properties of the new paths if the necessary
@@ -20,6 +20,10 @@ function [allPaths, allPathLengths, allPathWeights] = ...
 %                           value of T(i,j) is the probability of
 %                           transitioning from j->i. The columns of T
 %                           should be normalized (sum(T,1) == 1)
+%
+%       - distMatrix:       #N x #N pairwise distance matrix, i.e.
+%                           distMatrix(i,j) is the distance between cell i
+%                           and cell j
 %
 % 	OUTPUT PARAMETERS:
 %
@@ -46,6 +50,7 @@ function [allPaths, allPathLengths, allPathWeights] = ...
 %--------------------------------------------------------------------------
 if (nargin < 3), X = []; end
 if (nargin < 4), T = []; end
+if (nargin < 5), distMatrix = []; end
 
 validateattributes(oldPaths, {'cell'}, {'vector'}, ...
     'splitPathsAtIDx', 'oldPaths');
@@ -100,6 +105,25 @@ if ~isempty(T)
 
 end
 
+if ~isempty(distMatrix)
+
+    validateattributes(distMatrix, {'numeric'}, ...
+        {'2d', 'finite', 'real', 'square', 'nonnegative'}, ...
+        'splitPathsAtIDx', 'distMatrix');
+
+    if (numPoints > 1)
+        assert(size(distMatrix,1) == numPoints, ...
+            'Distance matrix is improperly sized (numPoints)');
+    elseif ~isempty(T)
+        assert(isequal(size(T), size(distMatrix)), ...
+            'Distance matrix is improperly sized (T)');
+    else
+        assert(size(distMatrix,1) >= maxPathPointID, ...
+            'Distance matrix is improperly sized (maxPathPointID)');
+    end
+
+end
+
 %--------------------------------------------------------------------------
 % SPLIT PATHS
 %--------------------------------------------------------------------------
@@ -134,14 +158,21 @@ allPaths = vertcat(allPaths{:});
 numPaths = numel(allPaths);
 
 allPathLengths = {};
-if ((nargout > 1) && ~isempty(X))
+if ((nargout > 1) && ~(isempty(X) && isempty(distMatrix)))
 
     allPathLengths = cell(numPaths, 1);
     for i = 1:numPaths
 
         curPath = [allPaths{i}(1:(end-1)), allPaths{i}(2:end)];
-        curPathLengths = X(curPath(:,2), :) - X(curPath(:,1), :);
-        curPathLengths = sqrt(sum(curPathLengths.^2, 2));
+
+        if isempty(distMatrix)
+            curPathLengths = X(curPath(:,2), :) - X(curPath(:,1), :);
+            curPathLengths = sqrt(sum(curPathLengths.^2, 2));
+        else
+            dmIDx = sub2ind(size(distMatrix), curPath(:,2), curPath(:,1));
+            curPathLengths = distMatrix(dmIDx);
+        end
+
         curPathLengths = [0; cumsum(curPathLengths)];
         allPathLengths{i} = curPathLengths;
 
