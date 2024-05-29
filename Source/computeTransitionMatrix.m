@@ -52,6 +52,14 @@ function T = computeTransitionMatrix(X, U, dt, varargin)
 %       - ('UseGPU', useGPU = true): Whether or not to perform computations
 %       on a GPU
 %
+%       - ('VolumeElementType', volumeType = 'graphLaplacian'): The type of
+%       volume element used to ensure the transition matrix operates on
+%       discrete probabilities. Possible types are 'graphLaplacian' or
+%       'laplaceBeltrami'.
+%
+%       - ('VolumeElement', volumeElement = []): A precomputed volume
+%       element for each point
+%
 %   OUTPUT PARAMETERS:
 %
 %       - T:    #N x #N (left Markov) transition matrix
@@ -92,11 +100,15 @@ clipThreshold = 0;
 strictNormalization = true;
 distMatrix = [];
 useGPU = true;
+volumeType = 'graphlaplacian';
+volumeElement = [];
+
+allVolumeTypes = {'graphlaplacian', 'laplacebeltrami'};
 
 supportedOptions = {'PointPotential', 'ScalarMetric', ...
     'DiffusionCoefficient', 'PointDiffusionCoefficient', ...
     'ClipThreshold', 'StrictNormalization', 'DistanceMatrix', ...
-    'UseGPU'};
+    'UseGPU', 'VolumeElementType', 'VolumeElement'};
 checkSupportedOptions(supportedOptions, varargin);
 
 for i = 1:length(varargin)
@@ -158,6 +170,27 @@ for i = 1:length(varargin)
         validateattributes(useGPU, {'logical'}, {'scalar'}, ...
             'computeTransitionMatrix', 'useGPU');
     end
+
+    if strcmpi(varargin{i}, 'VolumeElementType')
+        volumeType = lower(varargin{i+1});
+        validateattributes(volumeType, {'char'}, {'vector'}, ...
+            'computeTransitionMatrix', 'volumeType');
+        assert(ismember(volumeType, allVolumeTypes), ...
+            'Invalid volume element type');
+    end
+
+    if strcmpi(varargin{i}, 'VolumeElement')
+        volumeElement = varargin{i+1};
+        if ~isempty(volumeElement)
+            validateattributes(volumeElement, {'numeric'}, ...
+                {'vector', 'finite', 'real', 'positive', ...
+                'numel', numPoints}, 'computeTransitionMatrix', ...
+                'volumeElement');
+            if (size(volumeElement, 2) ~= 1)
+                volumeElement = volumeElement.';
+            end
+        end
+    end
     
 end
 
@@ -196,22 +229,37 @@ assert(~(isempty(X) && isempty(distMatrix)), ['You have to supply ' ...
 % COMPUTE TRANSITION MATRIX
 %--------------------------------------------------------------------------
 if useGPU
+
     X = gpuArray(X);
     U = gpuArray(U);
     U0 = gpuArray(U0);
     distMatrix = gpuArray(distMatrix);
     scalarMetric = gpuArray(scalarMetric);
-end
-    
 
-% Fast computation of squared Euclidean distances
+    if ~isempty(volumeElement)
+        volumeElement = gpuArray(volumeElement);
+    end
+
+end
+
+% Compute squared Euclidean distance matrix and add to operator
 if isempty(distMatrix)
-    T = X * X.';
-    T = -(diag(T) + diag(T).' - 2 .* T) ./ (4 * D * dt);
-else
-    T = -distMatrix.^2 ./ (4 * D * dt);
-end
 
+    % Fast computation
+    % T = X * X.';
+    % T = -(diag(T) + diag(T).' - 2 .* T) ./ (4 * D * dt);
+
+    % Stable/conservative memory computation
+    T = -pdist2(X, X, 'squaredeuclidean') ./ (4 * D * dt);
+
+else
+
+    T = -distMatrix.^2 ./ (4 * D * dt);
+
+end
+T(1:(numPoints+1):numel(T)) = 0; % Ensure zero diagonal elements
+
+% Add gradient dynamics term to operator
 if isempty(scalarMetric)
     
     U = U ./ (2 * D);
@@ -225,7 +273,43 @@ else
 end
 
 T = exp(T);
-T = exp(U0 ./ D0) .* T;
+
+% Handle volume element
+if ~isempty(volumeElement)
+
+    T = volumeElement .* T;
+
+else
+
+    if strcmpi(volumeType, 'graphlaplacian')
+
+        T = exp(U0 ./ D0) .* T;
+
+    elseif strcmpi(volumeType, 'laplacebeltrami')
+
+        affinityOptions = struct();
+        affinityOptions.Sigma = dt;
+        affinityOptions.NumNeighbors = numPoints;
+        affinityOptions.Verbose = false;
+        K = affinityMatrix(gather(X), affinityOptions);
+
+        mapOptions = struct();
+        mapOptions.Normalization = 'LaplaceBeltrami';
+        mapOptions.NumVectors = 0;
+        mapOptions.Verbose = false;
+        [~, ~, ~, ~, DAlpha] = diffusionMap(K, mapOptions);
+        DAlpha = full(DAlpha);
+        if useGPU, DAlpha = gpuArray(DAlpha); end
+
+        T = DAlpha .* T;
+
+    else
+
+        error('Invalid volume element type');
+
+    end
+
+end
 
 % Normalize transition matrix to be a right Markov matrix
 nanIDx = isnan(T(:));

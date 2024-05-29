@@ -1,4 +1,4 @@
-function [optKLDErr, optFixHeights, optScalarMetric, ...
+function [optErr, optFixHeights, optScalarMetric, ...
     optTimeScale, optTimes, optOutput] = fitStaticLandscape( ...
     X, dataProb, dataTimes, dt, allPaths, varargin)
 %FITSTATICLANDSCAPE Fits a single static dynamical landscape to a set of
@@ -117,12 +117,28 @@ function [optKLDErr, optFixHeights, optScalarMetric, ...
 %       to precompute the solver information needed to compute the
 %       interpolated potential. This can help to significantly speed up the
 %       code, but can also lead to OOM error for large problems run in
-%       parallel. *** I THINK MY CODE IS WRITTEN INEFFICIENTLY - HOW ON
-%       EARTH COULD THIS BE OOM-ING THE WORKSTATION? ***
+%       parallel.
 %
 %       - ('OptimizationOptions', optOptions = {}): A cell array containing
 %       options that can be supplied to a MATLAB 'optimoptions' object to
 %       define solver behavior
+%
+%       - ('UpperBounds', upperBounds = []): A set of upper bound
+%       constraints on the optimization variables
+%
+%       - ('LowerBounds', lowerBounds = []): A set of lower bound
+%       constraints on the optimization variables
+%
+%       - ('ErrorType', errorType = 'symKLD'): The type of error metric to
+%       minimize. Total error is the average "per timepoint" error weighted
+%       using dataset specific weights. See code for specific options.
+%       WARNING: Approximate earth mover's distance computation ('EMD') is
+%       VERY slow
+%
+%       - ('DataSetWeights', dataSetWeights = []): The relative weight of
+%       each data set to the total error computation. Weights should sum to
+%       one. All time points within each data set will be weighted
+%       identically
 %
 %   Physical Constants ----------------------------------------------------
 %   You are allowed to set these for the sake of completeness, but you are
@@ -199,6 +215,11 @@ function [optKLDErr, optFixHeights, optScalarMetric, ...
 %
 %       - ('StrictNormalization', strictNormalization = true): Whether or
 %       not to distribute round-off error in the column-wise normalization.
+%
+%       - ('VolumeElementType', volumeType = 'graphLaplacian'): The type of
+%       volume element used to ensure the transition matrix operates on
+%       discrete probabilities. Possible types are 'graphLaplacian' or
+%       'laplaceBeltrami'.
 %
 %   General Options -------------------------------------------------------
 %
@@ -288,8 +309,14 @@ constFixHeights = nan(numFixPoints, 1);
 constScalarMetric = [];
 precomputeQuadProg = true;
 optOptions = {};
+upperBounds = [];
+lowerBounds = [];
+errorType = 'symKLD';
+dataSetWeights = [];
 
 simTimeHandlingOptions = {'none', 'causal', 'constant'};
+allErrorTypes = lower({'symKLD', 'dataKLD', 'simKLD', ...
+    'MSE', 'geoSphere', 'EMD'});
 
 % Physical constants
 D = 1;
@@ -316,6 +343,8 @@ pathCollisionMethod = 'mean';
 % 'computeTransitionMatrix' options
 clipThreshold = 1e-14;
 strictNormalization = true;
+volumeType = 'graphlaplacian';
+allVolumeTypes = {'graphlaplacian', 'laplacebeltrami'};
 
 % General options
 useGPU = true;
@@ -331,7 +360,8 @@ supportedOptions = {'InitialConditions', 'NumSimTimes', 'IsSaddle', ...
     'NormalizeMassMatrix', 'PathLengths', 'PathInterpolationMethod', ...
     'PathCollisionMethod', 'ClipThreshold', 'StrictNormalization', ...
     'UseGPU', 'InitialGuess', 'EnforcePositiveMetric', ...
-    'PrecomputeQuadProg'};
+    'PrecomputeQuadProg', 'VolumeElementType', 'UpperBounds', ...
+    'LowerBounds', 'ErrorType', 'DataSetWeights'};
 checkSupportedOptions(supportedOptions, varargin);
 
 for i = 1:length(varargin)
@@ -443,6 +473,50 @@ for i = 1:length(varargin)
         optOptions = varargin{i+1};
         validateattributes(optOptions, {'cell'}, {'vector'}, ...
             'fitStaticLandscape', 'optOptions');
+    end
+
+    if strcmpi(varargin{i}, 'UpperBounds')
+        upperBounds = varargin{i+1};
+        if ~isempty(upperBounds)
+            validateattributes(upperBounds, {'numeric'}, {'vector', ...
+                'numel', numFixPoints+1, 'nonnan'}, ...
+                'fitStaticLandscape', 'upperBounds');
+            if (size(upperBounds, 2) ~= 1)
+                upperBounds = upperBounds .';
+            end
+        end
+    end
+
+    if strcmpi(varargin{i}, 'LowerBounds')
+        lowerBounds = varargin{i+1};
+        if ~isempty(lowerBounds)
+            validateattributes(lowerBounds, {'numeric'}, {'vector', ...
+                'numel', numFixPoints+1, 'nonnan'}, ...
+                'fitStaticLandscape', 'lowerBounds');
+            if (size(lowerBounds, 2) ~= 1)
+                lowerBounds = lowerBounds .';
+            end
+        end
+    end
+
+    if strcmpi(varargin{i}, 'ErrorType')
+        errorType = varargin{i+1};
+        validateattributes(errorType, {'char'}, {'vector'}, ...
+            'fitStaticLandscape', 'errorType');
+        assert(ismember(lower(errorType), allErrorTypes), ...
+            'Invalid error type supplied');
+    end
+
+    if strcmpi(varargin{i}, 'DataSetWeights')
+        dataSetWeights = varargin{i+1};
+        if ~isempty(dataSetWeights)
+            validateattributes(dataSetWeights, {'numeric'}, ...
+                {'vector', 'finite', 'positive', 'real'}, ...
+                'fitStaticLandscape', 'dataSetWeights');
+            if (size(dataSetWeights, 1) ~= 1)
+                dataSetWeights = dataSetWeights.';
+            end
+        end
     end
 
     % Physical Constants --------------------------------------------------
@@ -563,6 +637,14 @@ for i = 1:length(varargin)
             'fitStaticLandscape', 'strictNormalization');
     end
 
+    if strcmpi(varargin{i}, 'VolumeElementType')
+        volumeType = lower(varargin{i+1});
+        validateattributes(volumeType, {'char'}, {'vector'}, ...
+            'fitStaticLandscape', 'volumeType');
+        assert(ismember(volumeType, allVolumeTypes), ...
+            'Invalid volume element type');
+    end
+
     % General Options -----------------------------------------------------
 
     if strcmpi(varargin{i}, 'UseGPU')
@@ -587,6 +669,12 @@ if useGPU, try gpuDevice; catch, useGPU = false; end; end
 
 if ~any(isSaddle), enforceSaddles = false; end
 numConstHeights = sum(~isnan(constFixHeights));
+
+if strcmpi(simTimeHandling, 'constant')
+    assert(strcmpi(errorType, 'symKLD'), ['Constant simulation time ' ...
+        'handling is currently only capable of handling the ' ...
+        'symmetric KL divergence error']);
+end
 
 % Process the supplied initial guess --------------------------------------
 if ~isempty(initGuess)
@@ -655,6 +743,14 @@ for i = 1:numDataSets
 
         initConditions{i} = dataProb{i}(:,1);
 
+        % Don't count the initial condition in data sets
+        % TODO: CHECK IF THIS IS OKAY FOR CONSTANT TIME HANDLING
+        if ~strcmpi(simTimeHandling, 'constant')
+            dataProb{i}(:,1) = [];
+            dataTimes{i}(1) = [];
+            numDataPointsPerSet(i) = numDataPointsPerSet(i)-1;
+        end
+
     else
 
         validateattributes(initConditions{i}, {'numeric'}, {'vector', ...
@@ -690,6 +786,29 @@ end
 
 numTotalDataPoints = sum(numDataPointsPerSet);
 
+if isempty(dataSetWeights)
+
+    dataSetWeights = ones(1, numTotalDataPoints) ./ numTotalDataPoints;
+
+else
+
+    dataSetWeights = dataSetWeights ./ sum(dataSetWeights);
+    if (numel(dataSetWeights) == numDataSets)
+
+        dataSetWeights = dataSetWeights ./ numDataPointsPerSet;
+        dataSetWeights = repelem(dataSetWeights, numDataPointsPerSet);
+
+    else
+
+        assert(numel(dataSetWeights) == numTotalDataPoints, ...
+            ['Data set weights are improperly sized (make sure you ' ...
+            'are properly handling initial conditions)']);
+
+    end
+
+
+end
+
 %--------------------------------------------------------------------------
 % MANIFOLD/POINT SET/POTENTIAL OPTION PROCESSING
 %--------------------------------------------------------------------------
@@ -701,6 +820,41 @@ if isempty(U0)
 end
 
 if isempty(UB), UB = U0; end
+
+% Compute point cloud volume element --------------------------------------
+
+if verbose
+    fprintf('Computing transition matrix volume element... ');
+end
+
+if strcmpi(volumeType, 'GraphLaplacian')
+
+    volumeElement = exp(U0 ./ D0);
+
+elseif strcmpi(volumeType, 'LaplaceBeltrami')
+
+    affinityOptions = struct();
+    affinityOptions.Sigma = dt;
+    affinityOptions.NumNeighbors = numPoints;
+    affinityOptions.Verbose = false;
+    K = affinityMatrix(X, affinityOptions);
+
+    mapOptions = struct();
+    mapOptions.Normalization = 'LaplaceBeltrami';
+    mapOptions.NumVectors = 0;
+    mapOptions.Verbose = false;
+    [~, ~, ~, ~, DAlpha] = diffusionMap(K, mapOptions);
+    volumeElement = full(DAlpha);
+
+    clear affinityOptions K mapOptions DAlpha
+
+else
+
+    error('Invalid transition matrix volume element type');
+
+end
+
+if verbose, fprintf('Done\n'); end
 
 % Check Laplacian/mass matrix ---------------------------------------------
 if (isempty(L) || isempty(M))
@@ -836,20 +990,37 @@ end
 
 % Set bound constraints ---------------------------------------------------
 
-if enforcePositiveMetric
-    if verbose, disp('Enforcing positive metric'); end
-    lb = [-inf(numFixPoints, 1); 1e-12];
+if isempty(lowerBounds)
+
+    if enforcePositiveMetric
+        if verbose, disp('Enforcing positive metric'); end
+        lb = [-inf(numFixPoints, 1); 1e-12];
+    else
+        lb = -inf(numFixPoints+1, 1);
+    end
+
 else
-    lb = -inf(numFixPoints+1, 1);
+
+    lb = lowerBounds;
+    if enforcePositiveMetric
+        assert(lb(end) > 0, ['Lower bound constraint inconsistent ' ...
+            'with positive metric']);
+    end
+
 end
 
-ub = inf(numFixPoints+1, 1);
+if isempty(upperBounds)
+    ub = inf(numFixPoints+1, 1);
+else
+    ub = upperBounds;
+end
 
 % Determine if unconstrained minimization is feasible ---------------------
 
 constrainedValues = nan(numFixPoints+1, 1);
 runConstrainedMinimization = true;
-if ~enforceSaddles && ~enforcePositiveMetric && isempty(constHeightSum)
+if ( ~enforceSaddles && ~enforcePositiveMetric ...
+        && isempty(constHeightSum) && all(isinf(lb)) && all(isinf(ub)) )
 
     runConstrainedMinimization = false;
     constrainedValues(1:numFixPoints) = constFixHeights;
@@ -862,6 +1033,8 @@ if ~enforceSaddles && ~enforcePositiveMetric && isempty(constHeightSum)
     clear A b Aeq Beq lb ub
 
 end
+
+clear upperBounds lowerBounds
 
 %==========================================================================
 % RUN OPTIMIZATION
@@ -878,9 +1051,15 @@ if runConstrainedMinimization
     if verbose, disp('Running constrained optimization'); end
 
     options = optimoptions('fmincon', optOptions{:});
-    if options.UseParallel, useGPU = false; end
+    if options.UseParallel
+        if (verbose && useGPU)
+            disp(['Parallel finite difference computations ' ...
+                'override GPU option']);
+        end
+        useGPU = false;
+    end
 
-    [optVals, optKLDErr, ~, optOutput] = ...
+    [optVals, optErr, ~, optOutput] = ...
         fmincon(optFun, initGuess, A, b, Aeq, beq, lb, ub, [], options);
 
 else
@@ -888,9 +1067,15 @@ else
     if verbose, disp('Running unconstrained optimization'); end
 
     options = optimoptions('fminunc', optOptions{:});
-    if options.UseParallel, useGPU = false; end
+    if options.UseParallel
+        if (verbose && useGPU)
+            disp(['Parallel finite difference computations ' ...
+                'override GPU option']);
+        end
+        useGPU = false;
+    end
 
-    [optVals, optKLDErr, ~, optOutput] = ...
+    [optVals, optErr, ~, optOutput] = ...
         fminunc(optFun, initGuess, options);
 
 end
@@ -944,7 +1129,8 @@ optT = computeTransitionMatrix(X, optU, dt, ...
     'PointPotential', U0, 'ScalarMetric', optScalarMetric, ...
     'DiffusionCoefficient', D, 'PointDiffusionCoefficient', D0, ...
     'ClipThreshold', clipThreshold, ...
-    'StrictNormalization', strictNormalization);
+    'StrictNormalization', strictNormalization, ...
+    'VolumeElementType', volumeType, 'VolumeElement', volumeElement);
 
 optSimProb = cell(numDataSets, 1);
 for i = 1:numDataSets
@@ -966,26 +1152,70 @@ else
     optTimeScale = NaN;
 
     simTimes = (0:(numSimTimes-1)) * dt;
+    optCount = 0;
     optTimes = cell(1, numDataSets);
     for i = 1:numDataSets
 
         optMatchTimes = -ones(numDataPointsPerSet(i), 1);
         for ii = 1:numDataPointsPerSet(i)
 
-            optKLD = dataProb{i}(:, ii) .* ...
-                log(dataProb{i}(:, ii) ./ optSimProb{i}) + ...
-                optSimProb{i} .* log(optSimProb{i} ./ dataProb{i}(:, ii));
-            optKLD(isnan(optKLD)) = 0;
-            optKLD = sum(optKLD, 1);
+            optCount = optCount + 1;
+
+            if strcmpi(errorType, 'symKLD')
+
+                curOptErr = (dataProb{i}(:, ii) - optSimProb{i}) .* ...
+                    log(dataProb{i}(:, ii) ./ optSimProb{i});
+                curOptErr(isnan(curOptErr)) = 0;
+                curOptErr = sum(curOptErr, 1);
+
+            elseif strcmpi(errorType, 'simKLD')
+
+                curOptErr = optSimProb{i} .* ...
+                    log(optSimProb{i} ./ dataProb{i}(:, ii));
+                curOptErr(isnan(curOptErr)) = 0;
+                curOptErr = sum(curOptErr, 1);
+
+            elseif strcmpi(errorType, 'dataKLD')
+
+                curOptErr = dataProb{i}(:, ii) .* ...
+                    log(dataProb{i}(:, ii) ./ optSimProb{i});
+                curOptErr(isnan(curOptErr)) = 0;
+                curOptErr = sum(curOptErr, 1);
+
+            elseif strcmpi(errorType, 'MSE')
+
+                curOptErr = ...
+                    sum((dataProb{i}(:, ii)-optSimProb{i}).^2, 1) ./ ...
+                    sum(dataProb{i}(:, ii).^2, 1);
+
+            elseif strcmpi(errorType, 'geoSphere')
+
+                curOptErr = ...
+                    acos(sum(sqrt(dataProb{i}(:, ii) .* optSimProb{i}), 1));
+
+            elseif strcmpi(errorType, 'EMD')
+                
+                curOptErr = zeros(1, size(optSimProb{i}, 2));
+                for kk = 1:size(optSimProb{i}, 2)
+                    [~, optWasserDist, ~] = PPMOMT(X, X, ...
+                        optSimProb{i}(:, kk), dataProb{i}(:, ii), 200);
+                    curOptErr(kk) = optWasserDist(end);
+                end
+
+            else
+
+                error('Invalid error type');
+
+            end
 
             if strcmpi(simTimeHandling, 'none')
 
-                [~, optMatchTimes(ii)] = min(optKLD);
+                [~, optMatchTimes(ii)] = min(curOptErr);
 
             elseif strcmpi(simTimeHandling, 'causal')
 
-                if (ii > 1), optKLD(1:optMatchTimes(ii-1)) = inf; end
-                [~, optMatchTimes(ii)] = min(optKLD);
+                if (ii > 1), curOptErr(1:optMatchTimes(ii-1)) = inf; end
+                [~, optMatchTimes(ii)] = min(curOptErr);
 
             else
 
@@ -1055,11 +1285,14 @@ if verbose, fprintf('Done\n'); end
             'PointPotential', U0, 'ScalarMetric', scalarMetric, ...
             'DiffusionCoefficient', D, 'PointDiffusionCoefficient', D0, ...
             'ClipThreshold', clipThreshold, ...
-            'StrictNormalization', strictNormalization);
+            'StrictNormalization', strictNormalization, ...
+            'VolumeElementType', volumeType, ...
+            'VolumeElement', volumeElement);
 
         % NOTE: We perform this operation serially so that gradients can be
         % estimated in parallel, if desired
         E = 0;
+        count = 0; % An index into the data set weight vector
         % simTimes = (0:(numSimTimes-1)) * dt;
         for k = 1:numDataSets
 
@@ -1074,21 +1307,60 @@ if verbose, fprintf('Done\n'); end
             matchTimes = -ones(numDataPointsPerSet(k), 1);
             for j = 1:numDataPointsPerSet(k)
 
-                KLD = ...
-                    curDataProb(:,j) .* log(curDataProb(:,j) ./ simProb) + ...
-                    simProb .* log(simProb ./ curDataProb(:,j));
-                KLD(isnan(KLD)) = 0;
-                KLD = sum(KLD, 1);
+                count = count + 1; % Increment in the index
+
+                if strcmpi(errorType, 'symKLD')
+
+                    err = (curDataProb(:,j) - simProb) ...
+                        .* log(curDataProb(:,j) ./ simProb);
+                    err(isnan(err)) = 0;
+                    err = sum(err, 1);
+
+                elseif strcmpi(errorType, 'simKLD')
+
+                    err = simProb .* log(simProb ./ curDataProb(:,j));
+                    err(isnan(err)) = 0;
+                    err = sum(err, 1);
+
+                elseif strcmpi(errorType, 'dataKLD')
+    
+                    err = curDataProb(:,j) .* log(curDataProb(:,j) ./ simProb);
+                    err(isnan(err)) = 0;
+                    err = sum(err, 1);
+
+                elseif strcmpi(errorType, 'MSE')
+
+                    err = sum((curDataProb(:,j)-simProb).^2, 1) ./ ...
+                        sum(curDataProb(:,j).^2, 1);
+
+                elseif strcmpi(errorType, 'geoSphere')
+
+                    err = acos(sum(sqrt(curDataProb(:,j) .* simProb), 1));
+
+                elseif strcmpi(errorType, 'EMD')
+
+                    err = zeros(1, size(simProb, 2));
+                    for tt = 1:size(simProb, 2)
+                        [~, wasserDist, ~] = PPMOMT(X, X, ...
+                            simProb(:, tt), curDataProb(:, j), 100);
+                        err(tt) = wasserDist(end);
+                    end
+
+                else
+
+                    error('Invalid error type');
+
+                end
 
                 if strcmpi(simTimeHandling, 'none')
                     
-                    E = E + min(KLD);
+                    E = E + dataSetWeights(count) .* min(err);
 
                 elseif strcmpi(simTimeHandling, 'causal')
 
-                    if (j > 1), KLD(1:matchTimes(j-1)) = inf; end
-                    [minKLD, matchTimes(j)] = min(KLD);
-                    E = E + minKLD;
+                    if (j > 1), err(1:matchTimes(j-1)) = inf; end
+                    [minErr, matchTimes(j)] = min(err);
+                    E = E + dataSetWeights(count) .* minErr;
 
                 else
 
@@ -1102,7 +1374,7 @@ if verbose, fprintf('Done\n'); end
 
         end
 
-        E = E ./ numTotalDataPoints;
+        % E = E ./ numTotalDataPoints;
 
     end
 
@@ -1157,7 +1429,9 @@ if verbose, fprintf('Done\n'); end
             'PointPotential', U0, 'ScalarMetric', scalarMetric, ...
             'DiffusionCoefficient', D, 'PointDiffusionCoefficient', D0, ...
             'ClipThreshold', clipThreshold, ...
-            'StrictNormalization', strictNormalization);
+            'StrictNormalization', strictNormalization, ...
+            'VolumeElementType', volumeType, ...
+            'VolumeElement', volumeElement);
 
         simProb = cell(numDataSets, 1);
         for k = 1:numDataSets

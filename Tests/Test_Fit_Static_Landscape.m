@@ -358,7 +358,8 @@ fprintf('Computing unstable manifolds from base potential... ');
 D = 1;
 dt = 5e-3;
 U0 = U1Func(simX(:,1), simX(:,2));
-TUM = computeTransitionMatrix(simX, U0, dt);
+TUM = computeTransitionMatrix(simX, U0, dt, ...
+    'VolumeElementType', 'LaplaceBeltrami');
 isIrreducible = ~isTransitionMatrixReducible(TUM);
 assert(isIrreducible, ['Point set potential transition matrix is ' ...
     'reducible. Choose a larger time step']);
@@ -419,7 +420,8 @@ fprintf('Generating simulated data set... ')
 trueT = computeTransitionMatrix(simX, trueU, dt, ...
     'PointPotential', U0, 'ScalarMetric', trueScalarMetric, ...
     'DiffusionCoefficient', D, 'PointDiffusionCoefficient', D0, ...
-    'ClipThreshold', 1e-14, 'StrictNormalization', true);
+    'ClipThreshold', 1e-14, 'StrictNormalization', true, ...
+    'VolumeElementType', 'LaplaceBeltrami');
 
 dataProb = cell(numDataSets, 1);
 dataTimes = cell(numDataSets, 1);
@@ -514,7 +516,7 @@ xlabel('x'); ylabel('y');
 
 clear baseCRange interpCRange dynCRange
 
-%% View Simulate Probability Time Course ==================================
+%% View Simulated Probability Time Course =================================
 close all; clc;
 
 viewID = 3;
@@ -573,7 +575,7 @@ close all; clc;
 
 % Set optimization options
 optOptions = {'Display', 'iter', 'FiniteDifferenceType', 'forward', ...
-    'UseParallel', true, 'PlotFcn', {'optimplotx', 'optimplotfval'}};
+    'UseParallel', false, 'PlotFcn', {'optimplotx', 'optimplotfval'}};
 
 % Generate an initial guess that satisfies the constraints (just a
 % potential height sum constraint here)
@@ -587,7 +589,7 @@ initGuess = [zeros(numel(trueFixHeights), 1); 1];
 % constFixHeights(end) = 0; 
 constFixHeights = [];
 
-[KLDErr, fixHeights, scalarMetric, timeScale, fitTimes, optOutput] = ...
+[optErr, fixHeights, scalarMetric, timeScale, fitTimes, optOutput] = ...
     fitStaticLandscape( simX, dataProb, dataTimes, dt, allPaths, ...
     'InitialGuess', initGuess, 'InitialConditions', {}, ...
     'NumSimTimes', numSimTimes, 'IsSaddle', isSaddle, ...
@@ -597,5 +599,6 @@ constFixHeights = [];
     'EnforcePositiveMetric', true, ...
     'PointPotential', U0, 'BasePotential', U0, ...
     'Laplacian', [], 'MassMatrix', [], 'PathLengths', allPathLengths, ...
-    'UseGPU', false, 'Verbose', true );
+    'VolumeElementType', 'LaplaceBeltrami', ...
+    'UseGPU', true, 'Verbose', true, 'ErrorType', 'symKLD' );
 

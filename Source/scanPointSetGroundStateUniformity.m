@@ -46,11 +46,17 @@ function [allScalarUniErr, allGroundStateEigs, allU0, allIsReducible] = ...
 %       matrix, i.e. distMatrix(i,j) is the distance between cell i and
 %       cell j
 %
-%       - ('FixedPotential', U0 = []): #N x 1 scalar potential defined on
-%       the input points. If this field is supplied, the potential is held
-%       fixed over all time steps. If not, the potential is recalculated at
-%       each iteration, using the currrent time step as a bandwidth for
-%       density estimation
+%       - ('FixedPotential', fixU = []): #N x 1 scalar potential defined on
+%       the input points governing the hopping dynamics. If this field is
+%       supplied, the potential is held fixed over all time steps. If not,
+%       the potential is recalculated at each iteration, using the currrent
+%       time step as a bandwidth for density estimation
+%
+%       - ('FixedPointPotential', fixU0 = []): #N x 1 scalar potential
+%       defined on the input points that sets the 'volume' per point. If
+%       this field is supplied, the potential is held fixed over all time
+%       steps. If not, the potential is recalculated at each iteration,
+%       using the currrent time step as a bandwidth for density estimation
 %
 %       - ('Verbose', verbose = false): Whether or not to produce verbose
 %       progress output
@@ -107,12 +113,13 @@ tol = 1e-14;
 ensembleSize = 1;
 distMatrix = [];
 verbose = false;
+fixU = [];
 fixU0 = [];
 
 supportedOptions = {'DiffusionCoefficient', ...
     'PointDiffusionCoefficient', 'UseGPU', 'MaxIterations', ...
     'Tolerance', 'EnsembleSize', 'Verbose', 'DistanceMatrix', ...
-    'FixedPotential'};
+    'FixedPotential', 'FixedPointPotential'};
 checkSupportedOptions(supportedOptions, varargin);
 
 for i = 1:length(varargin)
@@ -167,6 +174,15 @@ for i = 1:length(varargin)
     end
 
     if strcmpi(varargin{i}, 'FixedPotential')
+        fixU = varargin{i+1};
+        if ~isempty(fixU)
+            validateattributes(fixU, {'numeric'}, {'vector', ...
+                'finite', 'real', 'numel', numPoints});
+            if (size(fixU, 2) ~= 1), fixU = fixU.'; end
+        end
+    end
+
+    if strcmpi(varargin{i}, 'FixedPointPotential')
         fixU0 = varargin{i+1};
         if ~isempty(fixU0)
             validateattributes(fixU0, {'numeric'}, {'vector', ...
@@ -218,8 +234,10 @@ for n = 1:numel(allTimeSteps)
           n, numel(allTimeSteps), allTimeSteps(n));
     end
     
-    % Estimate Density From Point Cloud -----------------------------------
+    % Compute Point Set/Dynamical Potential -------------------------------
     
+    % If no points set potential is supplied, it is estimated from the
+    % density at the current bandwidth
     if isempty(fixU0)
 
         if verbose
@@ -238,6 +256,14 @@ for n = 1:numel(allTimeSteps)
 
     end
 
+    % If no dynamical potential is supplied, it is assumed to be equal to
+    % the point set potential
+    if isempty(fixU)
+        U = U0;
+    else
+        U = fixU;
+    end
+
     allU0(:, n) = U0;
     
     % Construct Fokker-Planck Transition Matrix ---------------------------
@@ -245,15 +271,16 @@ for n = 1:numel(allTimeSteps)
     if verbose, fprintf('Constructing transition matrix... '); end
 
     if (numel(X) == 2)
-        T = computeTransitionMatrix([], U0, allTimeSteps(n), ...
+        T = computeTransitionMatrix([], U, allTimeSteps(n), ...
             'DiffusionCoefficient', D, 'PointDiffusionCoefficient', D0, ...
             'ClipThreshold', 1e-14, 'StrictNormalization', true, ...
-            'UseGPU', useGPU, 'DistanceMatrix', distMatrix);
+            'UseGPU', useGPU, 'DistanceMatrix', distMatrix, ...
+            'PointPotential', U0);
     else
-        T = computeTransitionMatrix(X, U0, allTimeSteps(n), ...
+        T = computeTransitionMatrix(X, U, allTimeSteps(n), ...
             'DiffusionCoefficient', D, 'PointDiffusionCoefficient', D0, ...
             'ClipThreshold', 1e-14, 'StrictNormalization', true, ...
-            'UseGPU', useGPU);
+            'UseGPU', useGPU, 'PointPotential', U0);
     end
     
     if verbose, fprintf('Done\n'); end

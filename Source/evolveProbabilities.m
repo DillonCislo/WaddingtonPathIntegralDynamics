@@ -55,7 +55,7 @@ end
 if (size(initProb, 2) ~= 1), initProb = initProb.'; end
 numStates = numel(initProb);
 
-if ismatrix(T), T = {T}; end
+if (ismatrix(T) && ~iscell(T)), T = {T}; end
 assert(iscell(T), ['Transition matrix must be supplied as a single ' ...
     'matrix or as a cell array of matrices']);
 cellfun(@(x) validateattributes(x, {'numeric'}, {'2d', 'finite', ...
