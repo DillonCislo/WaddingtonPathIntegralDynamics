@@ -186,7 +186,7 @@ if numEigs > 0
     else
         
         % 'eig' doesn't return the values sorted
-        [V, lambda] = eig(MB);
+        [V, lambda] = eig(full(MB));
         [lambda, sortIDx] = sort(diag(lambda),'descend');
         lambda = lambda(1:numEigs);
         V = V(:,sortIDx(1:numEigs));

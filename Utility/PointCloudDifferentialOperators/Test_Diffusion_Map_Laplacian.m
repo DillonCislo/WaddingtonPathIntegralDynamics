@@ -4,8 +4,10 @@
 clear; close all; clc;
 
 numPoints = 8000;
-% X = randsphere(numPoints);
-[X, F] = subdivided_sphere(4);
+X = randsphere(numPoints);
+
+% [X, F] = subdivided_sphere(4);
+% numPoints = size(X,1);
 
 % Compute a spherical harmonic on the point cloud
 l = randi(4)+1;
@@ -19,7 +21,7 @@ if useCotanLaplacian
     L = cotmatrix(X, F);
     M = massmatrix(X, F, 'voronoi');
 else   
-    [L, M] = diffusionMapLaplacian(X, -1, -1);
+    [L, M, lapSigma] = diffusionMapLaplacian(X, -1, -1);
 end
 lapYlm = (M \ L) * Ylm;
 
@@ -27,9 +29,9 @@ lapYlm = (M \ L) * Ylm;
 lapErr = abs(lapYlm - trueLapYlm) ./ abs(trueLapYlm);
 lapErr(isinf(lapErr)) = NaN;
 
-fprintf('Max error = %0.5e\n', max(lapErr));
-fprintf('Mean error = %0.5e\n', mean(lapErr, 'omitnan'));
-fprintf('Median error = %0.5e\n', median(lapErr, 'omitnan'));
+fprintf('Max error = %0.5f\n', max(lapErr));
+fprintf('Mean error = %0.5f\n', mean(lapErr, 'omitnan'));
+fprintf('Median error = %0.5f\n', median(lapErr, 'omitnan'));
 
 % View Results ------------------------------------------------------------
 figure('color', 'w', 'units', 'normalized', 'outerposition', [0.5 0 0.5 1]);
@@ -65,5 +67,23 @@ errColors = vals2colormap(lapErr, 'parula', [0 1]);
 scatter3(X(:,1), X(:,2), X(:,3), [], errColors, 'filled');
 axis equal
 colorbar
-set(gca, 'Clim', [0 1]);
+set(gca, 'Clim', [0 0.5]);
 title('Relative Error');
+
+%%
+close all; clc;
+
+invM = spdiags(1./diag(M), 0, size(M,1), size(M,2));
+[V1, D1] = eig(full(invM * (-L)), 'vector');
+[~, sortIDx] = sort(abs(D1), 'ascend');
+D1 = D1(sortIDx);
+V1 = V1(:, sortIDx);
+
+[V2, D2] = eig(full(-L), full(M), 'vector');
+[~, sortIDx] = sort(abs(D2), 'ascend');
+D2 = D2(sortIDx);
+V2 = V2(:, sortIDx);
+%%
+[V3, D3] = eigs(-L, M, 500, 'smallestabs', 'Tolerance', 1e-16, ...
+    'MaxIterations', 500, 'SubspaceDimension', 2000);
+D3 = diag(D3);

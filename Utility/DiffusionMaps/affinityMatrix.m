@@ -200,8 +200,8 @@ if selfTune
     
 else
     
-    % if (sigma < 0), sigma = median(vals); end
-    if (sigma < 0), sigma = (mean(nnDists(:,2))+2*std(nnDists(:,2)))/4; end
+    % if (sigma <= 0), sigma = median(vals); end
+    if (sigma <= 0), sigma = (mean(nnDists(:,2))+2*std(nnDists(:,2)))/4; end
 
     % vals = exp(-vals.^2 / (2*sigma.^2));
     vals = exp(-vals.^2 / (4*sigma));

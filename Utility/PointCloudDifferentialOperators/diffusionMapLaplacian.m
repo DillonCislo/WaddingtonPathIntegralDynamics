@@ -1,4 +1,4 @@
-function [L, M] = diffusionMapLaplacian(X, sigma, kNN)
+function [L, M, sigma] = diffusionMapLaplacian(X, sigma, kNN)
 %DIFFUSIONMAPLAPLACIAN Construct a point cloud Laplace-Beltrami operator
 %based on a diffusion map algorithm. For any manifold with a boundary, the
 %Laplace-Beltrami operator needs to be interpreted as acting with Neumann
@@ -24,6 +24,9 @@ function [L, M] = diffusionMapLaplacian(X, sigma, kNN)
 %                   off-diagonal entries.
 %
 %       - M:        #N x #N diagonal mass matrix
+%
+%       - sigma:    Returns the computed value of sigma. If a specific
+%                   value is supplied, then this is identical to the input. 
 %
 %   by Dillon Cislo 2024/03/21
 
