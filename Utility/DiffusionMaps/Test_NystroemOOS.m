@@ -43,8 +43,8 @@ clear newPoint numFound
 affinityOptions = struct();
 affinityOptions.DistanceType = 'euclidean';
 affinityOptions.NumNeighbors = 500;
-affinityOptions.SelfTune = 7;
-% affinityOptions.Sigma = -1;
+% affinityOptions.SelfTune = 7;
+affinityOptions.Sigma = -1;
 
 fprintf('\nGenerating in-sample affinity kernel matrix... ');
 [K, ~, ~, sigma] = affinityMatrix(X, affinityOptions);
