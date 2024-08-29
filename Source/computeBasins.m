@@ -44,7 +44,13 @@ function [basinProb, basinCounts, basinIDx, incPointIDx] = computeBasins( ...
 %       supplying an abbreviated list of input basins!). NOTE: Each element
 %       of each basin is an index into 'basinLocIDx'. Each set of basins to
 %       be merged will keep the ID of the FIRST basin in the corresponding
-%       list
+%       list. Also, if a given point is excluded from this ANY merged
+%       basin, then it will be summarily excluded from ALL associated
+%       merged basins
+%
+%       - ('ExcludeFromBasins', excludeFromBasins = []): #N x #B logical
+%       matrix. If excludeFromBasins(i,j) is true, the ith point cannot be
+%       assigned to the jth basin.
 %
 %   OUTPUT PARAMETERS:
 %
@@ -104,11 +110,12 @@ distMatrix = [];
 distMethod = 'euclidean';
 probThreshold = 0;
 mergeBasins = {};
+excludeFromBasins = [];
 
 allDistMethods = {'euclidean', 'probability'};
 
 supportedOptions = {'DistanceMatrix', 'DistanceMethod', ...
-    'ProbabilityThreshold', 'MergeBasins'};
+    'ProbabilityThreshold', 'MergeBasins', 'ExcludeFromBasins'};
 checkSupportedOptions(supportedOptions, varargin);
 
 for i = 1:length(varargin)
@@ -150,6 +157,17 @@ for i = 1:length(varargin)
         mergeBasins = mergeBasins(:);
     end
 
+    if strcmpi(varargin{i}, 'ExcludeFromBasins')
+        excludeFromBasins = varargin{i+1};
+        if ~isempty(excludeFromBasins)
+            validateattributes(excludeFromBasins, {'logical'}, ...
+                {'2d', 'nrows', numPoints, 'ncols', numBasins}, ...
+                'computeBasins', 'excludeFromBasins');
+            assert(~any(all(excludeFromBasins, 2)), ...
+                'You must be able to assing points to at least one basin');
+        end
+    end
+
 end
 
 if ~isempty(mergeBasins)
@@ -164,7 +182,10 @@ if ~isempty(mergeBasins)
 
         pairIDx = nchoosek(1:numel(mergeBasins), 2);
         checkIntersections = mergeBasins(pairIDx);
-        checkIntersections = cellfun(@(x,y) numel(setdiff(x,y)) == 0, ...
+        if (size(checkIntersections, 2) == 1)
+            checkIntersections = checkIntersections.';
+        end
+        checkIntersections = cellfun(@(x,y) numel(intersect(x,y)) == 0, ...
             checkIntersections(:,1), checkIntersections(:,2), ...
             'Uni', true);
         assert(all(checkIntersections), ['Lists of basin IDs to be ' ...
@@ -188,13 +209,13 @@ if strcmpi(distMethod, 'euclidean')
 
         assert(~isempty(X), ['Please supply either a distance matrix ' ...
             'OR explicit point cloud coordinates']);
-        basinIDx = knnsearch(X(basinLocIDx, :), X);
+
+        % basinIDx = knnsearch(X(basinLocIDx, :), X);
+        distMatrix = pdist2(X, X(basinLocIDx, :), 'euclidean');
 
     else
 
-        basinIDx = distMatrix(:, basinLocIDx);
-        [~, basinIDx] = min(basinIDx, [], 2);
-
+        distMatrix = distMatrix(:, basinLocIDx);
     end
 
 elseif strcmpi(distMethod, 'probability')
@@ -202,11 +223,8 @@ elseif strcmpi(distMethod, 'probability')
     assert(~isempty(T), 'Please supply a transition matrix');
 
     diffGraph = digraph(-log(T));
-    transDistMatrix = distances(diffGraph, basinLocIDx, ...
-        'Method', 'positive');
-
-    [~, basinIDx] = min(transDistMatrix, [], 1);
-    basinIDx = basinIDx.';
+    distMatrix = distances(diffGraph, basinLocIDx, ...
+        'Method', 'positive').';
 
 else
 
@@ -218,19 +236,47 @@ end
 for i = 1:numel(mergeBasins)
 
     mergeIDx = mergeBasins{i};
-    oldBasinIDx = 1:numBasins;
 
-    newBasinIDx = oldBasinIDx;
-    newBasinIDx(mergeIDx) = mergeIDx(1);
-    [~, newBasinIDx] = ismember(newBasinIDx, ...
-        setdiff(oldBasinIDx, mergeIDx(2:end)));
+    distMatrix(:, mergeIDx(1)) = min(distMatrix(:, mergeIDx), [], 2);
+    distMatrix(:, mergeIDx(2:end)) = NaN;
 
-    basinIDx = changem(basinIDx, newBasinIDx, oldBasinIDx);
-    mergeBasins = cellfun(@(x) changem(x, newBasinIDx, oldBasinIDx), ...
-        mergeBasins, 'Uni', false);
-    numBasins = numBasins - numel(mergeIDx) + 1;
+    if ~isempty(excludeFromBasins)
+        excludeFromBasins(:, mergeIDx) = ...
+            repmat(any(excludeFromBasins(:, mergeIDx), 2), ...
+            [1, numel(mergeIDx)]);
+    end
 
 end
+
+rmBasinIDx = any(isnan(distMatrix), 1);
+distMatrix(:, rmBasinIDx) = [];
+numBasins = size(distMatrix, 2);
+
+if ~isempty(excludeFromBasins)
+    excludeFromBasins(:, rmBasinIDx) = [];
+    distMatrix(excludeFromBasins) = Inf;
+end
+
+[~, basinIDx] = min(distMatrix, [], 2);
+
+% Handle basin mergers (OLD METHOD)
+% [~, basinIDx] = min(distMatrix, [], 2);
+% for i = 1:numel(mergeBasins)
+% 
+%     mergeIDx = mergeBasins{i};
+%     oldBasinIDx = 1:numBasins;
+% 
+%     newBasinIDx = oldBasinIDx;
+%     newBasinIDx(mergeIDx) = mergeIDx(1);
+%     [~, newBasinIDx] = ismember(newBasinIDx, ...
+%         setdiff(oldBasinIDx, mergeIDx(2:end)));
+% 
+%     basinIDx = changem(basinIDx, newBasinIDx, oldBasinIDx);
+%     mergeBasins = cellfun(@(x) changem(x, newBasinIDx, oldBasinIDx), ...
+%         mergeBasins, 'Uni', false);
+%     numBasins = numBasins - numel(mergeIDx) + 1;
+% 
+% end
 
 % Number of points associated to each basin
 basinCounts = histcounts(basinIDx(incPointIDx), 0.5:(numBasins+0.5)).';

@@ -1197,7 +1197,7 @@ else
                 
                 curOptErr = zeros(1, size(optSimProb{i}, 2));
                 for kk = 1:size(optSimProb{i}, 2)
-                    [~, optWasserDist, ~] = PPMOMT(X, X, ...
+                    [~, optWasserDist, ~] = PPMMOMT(X, X, ...
                         optSimProb{i}(:, kk), dataProb{i}(:, ii), 200);
                     curOptErr(kk) = optWasserDist(end);
                 end

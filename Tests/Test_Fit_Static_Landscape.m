@@ -404,7 +404,8 @@ fprintf('Done\n');
 
 trueUI = interpolatePotentialKHarmonic(simX, knownU, knownIDx, ...
             2, 'TimeStep', dt, 'Verbose', true);
-trueU = (U0 + trueUI) ./ trueScalarMetric;
+
+trueU = (U0 + trueUI);
 
 %--------------------------------------------------------------------------
 % Generate Simulated Data

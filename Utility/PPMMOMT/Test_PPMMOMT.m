@@ -11,7 +11,7 @@
 clear; close all; clc;
 
 % Generate data point from multivariate Gaussian distribution -------------
-numPoints = 10000;
+numPoints = 250; % 10000;
 dim = 10;
 
 mu1 = ones(1, dim);

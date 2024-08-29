@@ -1,5 +1,5 @@
 function [emd, flowMatrix] = earthMoversDistance(F1, W1, F2, W2, distMatrix)
-%EARTHMOVERSDISTANCE Computes the Earth Mover's Distance between two
+%EARTHMOVERSDISTANCE Computes the Earth Mover's Distance (EMD) between two
 %signatures defined on point sets in R^dim
 %
 %   INPUT PARAMETERS:
@@ -8,7 +8,9 @@ function [emd, flowMatrix] = earthMoversDistance(F1, W1, F2, W2, distMatrix)
 %       - W1:           #N1 x 1 set of weights
 %       - F2:           #N2 x dim set of feature vector coordinates
 %       - W2:           #N2 x 1 set of weights
-%       - distMatrix:   #N1 x #N2 set of distances between feature points
+%       - distMatrix:   #N1 x #N2 set of costs for mapping between feature
+%                       points. For classic EMD, this should be the
+%                       Euclidean distance.
 %
 %   OUTPUT PARAMETERS:
 %
@@ -75,7 +77,8 @@ beq = min(sum(W1), sum(W2));
 lb = zeros(N1*N1, 1);
 
 % Solve the linear problem
-[flowMatrix, emd] = linprog(distMatrix(:), A, b, Aeq, beq, lb);
+options = optimoptions('linprog', 'Display', 'off');
+[flowMatrix, emd] = linprog(distMatrix(:), A, b, Aeq, beq, lb, [], options);
 emd = emd ./ sum(flowMatrix);
 flowMatrix = reshape(flowMatrix, [N1, N2]);
 

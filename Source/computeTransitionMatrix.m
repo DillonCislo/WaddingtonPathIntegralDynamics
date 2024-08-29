@@ -1,4 +1,4 @@
-function T = computeTransitionMatrix(X, U, dt, varargin)
+function [T, volumeElement] = computeTransitionMatrix(X, U, dt, varargin)
 %COMPUTETRANSITIONMATRIX Compute the transition matrix that discretizes the
 %short time Fokker-Planck drift-diffusion dynamics on a set of points
 %subject to a user defined potential. Explicitly, T(i,j) defines the
@@ -46,7 +46,7 @@ function T = computeTransitionMatrix(X, U, dt, varargin)
 %       not to distribute round-off error in the column-wise normalization.
 %
 %       - ('DistanceMatrix', distMatrix = []): #N x #N pairwise distance
-%       matrix, i.e. distMatirx(i,j) is the distance between cell i and
+%       matrix, i.e. distMatrix(i,j) is the distance between cell i and
 %       cell j.
 %
 %       - ('UseGPU', useGPU = true): Whether or not to perform computations
@@ -60,9 +60,17 @@ function T = computeTransitionMatrix(X, U, dt, varargin)
 %       - ('VolumeElement', volumeElement = []): A precomputed volume
 %       element for each point
 %
+%       - ('PrecomputeBaseT', precompT = []): #N x #N matrix with elements
+%       equal to -distMatrix.^2 ./ (4 * D * dt). This is not really
+%       intended for most use cases, but instead to speed up repeated
+%       computations when this function is called as a subroutine of a
+%       larger method.
+%
 %   OUTPUT PARAMETERS:
 %
-%       - T:    #N x #N (left Markov) transition matrix
+%       - T:                #N x #N (left Markov) transition matrix
+%
+%       - volumeElement:    #N x 1 volume element for each point
 %
 %   by Dillon Cislo 2024/03/21
 
@@ -99,6 +107,7 @@ D0 = 1;
 clipThreshold = 0;
 strictNormalization = true;
 distMatrix = [];
+precompT = [];
 useGPU = true;
 volumeType = 'graphlaplacian';
 volumeElement = [];
@@ -108,7 +117,7 @@ allVolumeTypes = {'graphlaplacian', 'laplacebeltrami'};
 supportedOptions = {'PointPotential', 'ScalarMetric', ...
     'DiffusionCoefficient', 'PointDiffusionCoefficient', ...
     'ClipThreshold', 'StrictNormalization', 'DistanceMatrix', ...
-    'UseGPU', 'VolumeElementType', 'VolumeElement'};
+    'UseGPU', 'VolumeElementType', 'VolumeElement', 'PrecomputeBaseT'};
 checkSupportedOptions(supportedOptions, varargin);
 
 for i = 1:length(varargin)
@@ -191,6 +200,16 @@ for i = 1:length(varargin)
             end
         end
     end
+
+    if strcmpi(varargin{i}, 'PrecomputeBaseT')
+        precompT = varargin{i+1};
+        if ~isempty(precompT)
+            validateattributes(precompT, {'numeric'}, {'2d', ...
+                '<=', 0, 'finite', 'real', ...
+                'ncols', numPoints, 'nrows', numPoints}, ...
+                'computeTransitionMatrix', 'precompT')
+        end
+    end
     
 end
 
@@ -233,17 +252,24 @@ if useGPU
     X = gpuArray(X);
     U = gpuArray(U);
     U0 = gpuArray(U0);
-    distMatrix = gpuArray(distMatrix);
     scalarMetric = gpuArray(scalarMetric);
-
-    if ~isempty(volumeElement)
-        volumeElement = gpuArray(volumeElement);
-    end
+    
+    if ~isempty(precompT), precompT = gpuArray(precompT); end
+    if ~isempty(distMatrix), distMatrix = gpuArray(distMatrix); end
+    if ~isempty(volumeElement), volumeElement = gpuArray(volumeElement);end
 
 end
 
 % Compute squared Euclidean distance matrix and add to operator
-if isempty(distMatrix)
+if ~isempty(precompT)
+    
+    T = precompT;
+    
+elseif ~isempty(distMatrix)
+
+    T = -distMatrix.^2 ./ (4 * D * dt);
+
+else
 
     % Fast computation
     % T = X * X.';
@@ -251,10 +277,6 @@ if isempty(distMatrix)
 
     % Stable/conservative memory computation
     T = -pdist2(X, X, 'squaredeuclidean') ./ (4 * D * dt);
-
-else
-
-    T = -distMatrix.^2 ./ (4 * D * dt);
 
 end
 T(1:(numPoints+1):numel(T)) = 0; % Ensure zero diagonal elements
@@ -285,12 +307,17 @@ else
 
         T = exp(U0 ./ D0) .* T;
 
+        if (nargout > 1), volumeElement = gather(exp(U0 ./ D0)); end
+
     elseif strcmpi(volumeType, 'laplacebeltrami')
 
         affinityOptions = struct();
         affinityOptions.Sigma = dt;
         affinityOptions.NumNeighbors = numPoints;
         affinityOptions.Verbose = false;
+        if ~isempty(distMatrix)
+            affinityOptions.DistanceMatrix = distMatrix;
+        end
         K = affinityMatrix(gather(X), affinityOptions);
 
         mapOptions = struct();
@@ -302,6 +329,8 @@ else
         if useGPU, DAlpha = gpuArray(DAlpha); end
 
         T = DAlpha .* T;
+
+        if (nargout > 1), volumeElement = gather(DAlpha); end
 
     else
 
