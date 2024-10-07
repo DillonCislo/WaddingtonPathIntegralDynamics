@@ -28,12 +28,13 @@ U = x.^4 + y.^4 + x.^3 - 2.*x.*y.^2 - x.^2 + p3*x + p4*y;
 
 % Perform symbolic analysis -----------------------------------------------
 gradU = simplify(gradient(U, [x y]));
+delU = simplify(laplacian(U, [x,y]));
 
 % Generate anonymous functions from analytic statements
 symU = U;
 UFunc = matlabFunction(U, 'Vars', {x, y});
 gradUFunc = matlabFunction(gradU.', 'Vars', {x, y});
-% delU1Func = matlabFunction(delU1, 'Vars', {x, y});
+delUFunc = matlabFunction(delU, 'Vars', {x, y});
 
 % Find fixed points of the deterministic gradient flow numerically
 fixedPts = vpasolve([gradU(1) == 0; gradU(2) == 0], [x y]);
@@ -140,7 +141,7 @@ rng(88, 'twister');
 % rng(25, 'twister'); % For reproducible random numbers
 
 D0 = 0.2; % 1; % Diffusion coefficient
-numPoints = 5000; % Total number of points
+numPoints = 1e4; % 5000; % Total number of points
 numTimePts = 50000; % Number of time steps for each simulation
 dtSODE = 0.01; % Simulation time step
 
@@ -252,12 +253,12 @@ clear dtSODE
 %% Build Transition Matrix and Compute Most Probable Paths ================
 close all; clc;
 
-D = 1;
-dt = 5e-3; % <---- THE DYNAMICAL TIME STEP
-scalarMetric = 0.0125;
+D = 0.025;
+dt = 1e-2; % <---- THE DYNAMICAL TIME STEP
+scalarMetric = 1;
 simU = UFunc(simX(:,1), simX(:,2));
 
-volumeType = 'LaplaceBeltrami';
+volumeType = 'GraphLaplacian';
 if strcmpi(volumeType, 'LaplaceBeltrami')
     simU0 = simU;
 elseif strcmpi(volumeType, 'GraphLaplacian')
@@ -268,7 +269,7 @@ else
 end
 
 T = computeTransitionMatrix(simX, simU, dt, ...
-    'PointDiffusionCoefficient', D0, 'DiffusionCoefficient', D, ...
+    'PointDiffusionCoefficient', D, 'DiffusionCoefficient', D, ...
     'ClipThreshold', 1e-12, 'StrictNormalization', true, 'useGPU', true, ...
     'PointPotential', simU0, 'VolumeElementType', volumeType, ...
     'ScalarMetric', scalarMetric);

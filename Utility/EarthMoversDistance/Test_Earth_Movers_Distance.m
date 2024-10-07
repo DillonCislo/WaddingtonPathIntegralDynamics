@@ -8,19 +8,40 @@
 % should be exact, but scales too poorly to be used for large point clouds;
 clear; close all; clc;
 
-numPoints = 8000;
-dim = 10;
+numPoints = 500;
+dim = 5;
 maxIter = 1e4;
 maxDelta = 1e-4;
+pointCloudType = 'test';
 
-X = 10 .* rand(numPoints, dim) - 5;
+if strcmpi(pointCloudType, 'random')
+
+    % X = 10 .* rand(numPoints, dim) - 5;
+    X = rand(numPoints, dim);
+
+    r = rand(numPoints, 1);
+    % r(randperm(numPoints, ceil(numPoints/4))) = 0;
+    r = r ./ sum(r);
+    c = rand(numPoints, 1); c = c ./ sum(c);
+
+elseif strcmpi(pointCloudType, 'test')
+    load('Test_Point_Cloud_5D.mat');
+
+    if (size(X,1) > numPoints)
+        keepIDx = randsample(1:size(X,1), numPoints);
+        X = X(keepIDx, :);
+        r = r(keepIDx); r = r ./ sum(r);
+        c = c(keepIDx); c = c ./ sum(c);
+    elseif (size(X,1) < numPoints)
+        error('Too many points');
+    end
+
+else
+    error('Invalid point cloud type');
+end
+
 M = pdist2(X, X, 'squaredeuclidean');
 % M = M ./ median(M(:));
-
-r = rand(numPoints, 1);
-% r(randperm(numPoints, ceil(numPoints/4))) = 0;
-r = r ./ sum(r);
-c = rand(numPoints, 1); c = c ./ sum(c);
 
 allLambda = [0, 1, 2, 5, 10, 15, 25, 50, 100] ./ median(M(:));
 % allLambda = (0:100) ./ median(M(:));
@@ -97,9 +118,10 @@ maxIter = 1e4;
 maxDelta = 1e-4;
 numDists = 250;
 
-X = 10 .* rand(numPoints, dim) - 5;
+% X = 10 .* rand(numPoints, dim) - 5;
+X = rand(numPoints, dim);
 M = pdist2(X, X, 'euclidean');
-M = M ./ median(M(:));
+% M = M ./ median(M(:));
 
 r = rand(numPoints, 1);
 % r(randperm(numPoints, ceil(numPoints/4))) = 0;
@@ -107,6 +129,7 @@ r = r ./ sum(r);
 c = rand(numPoints, numDists); c = c ./ sum(c, 1);
 
 allLambda = [0, 1, 2, 5, 10, 15, 25, 50, 100] ./ median(M(:));
+% allLambda = [0, 1, 2, 5, 10] ./ median(M(:));
 % allLambda = (0:100) ./ median(M(:));
 % allLambda = [0, 1, 2, 5, 10, 15, 25, 50, 100];
 % allLambda = 250  ./ median(M(:));
@@ -120,7 +143,7 @@ for i = 1:numel(allLambda)
     % profile on
     emdSD(i) = min(sinkhornDistance(r, c, 'CostMatrix', M, ...
         'Lambda', allLambda(i), 'MaxIterations', maxIter, ...
-        'useGPU', true, 'Verbose', false, 'Stable', true));
+        'useGPU', true, 'Verbose', false, 'Stability', 'stable'));
     % profile viewer
     sdTimes(i) = toc;
 end
@@ -134,7 +157,7 @@ for i = 1:numel(allLambda)
     % profile on
     emdSDUnstable(i) = min(sinkhornDistance(r, c, 'CostMatrix', M, ...
         'Lambda', allLambda(i), 'MaxIterations', maxIter, ...
-        'useGPU', true, 'Verbose', false, 'Stable', false));
+        'useGPU', true, 'Verbose', false, 'Stability', 'unstable'));
     % profile viewer
     sdTimesUnstable(i) = toc;
 end

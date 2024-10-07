@@ -186,10 +186,10 @@ end
 if useGPU, try gpuDevice; catch, useGPU = false; end; end
 
 if (strcmpi(stability, 'Stable') && (size(C,2) > 1))
-    stability = 'semi-stable';
+    stability = 'unstable';
     if verbose
         warning(['Stable computation only supports vector C input. ' ...
-            'Switching to semi-stable.']);
+            'Switching to unstable.']);
     end
 end
 
@@ -265,6 +265,9 @@ if strcmpi(stability, 'Stable')
     D = gather(sum(u .* ((exp(mlM) .* M) * v)));
 
 elseif strcmpi(stability, 'semi-stable')
+
+    D = NaN;
+    error('Semi-stable computation is not yet implemented');
 
 elseif strcmpi(stability, 'unstable')
 

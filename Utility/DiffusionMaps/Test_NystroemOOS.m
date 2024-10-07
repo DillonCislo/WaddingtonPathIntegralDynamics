@@ -21,7 +21,6 @@ insideDumbell = @(x) ...
 X = nan(numPoints+numPointsOOS, 3);
 numFound = 0;
 while numFound < (numPoints+numPointsOOS)
-
     progressbar(numFound, numPoints+numPointsOOS);
 
     newPoint = (L+2*R) * rand(1, 3) - (L/2+R);

@@ -89,7 +89,7 @@ fprintf('Done\n');
 sinkIDx = fpLambda < 0;
 saddleIDx = fpLambda >= 0;
 
-surf(X, Y, reshape(U, size(X)));
+surf(X, Y, reshape(U, size(X)), reshape(min(U, 2), size(X)));
 hold on
 scatter3(fixedPts(sinkIDx, 1), fixedPts(sinkIDx, 2), fpU(sinkIDx), ...
     'filled', 'r');
@@ -102,7 +102,7 @@ xlabel('x'); ylabel('y');
 axis equal
 % xlim([-1.3 1.3]);
 % ylim([-1.3 1.3]);
-% zlim([min(U(:)), 2]);
+zlim([min(U(:))-1e-2, 2]);
 
 clear i J numJ numPts saddleIDx sinkIDx sortOrder x y
 % clear D p3 p4
@@ -113,11 +113,13 @@ close all; clc;
 % Initial density
 % P0 = reshape(exp(-UFunc(X(:), Y(:))./D), size(X));
 % P0 = (X-fixedPts(2,1)).^2  + (Y-fixedPts(2,2)).^2 < (0.1.^2);
-P0 = (X-0).^2 + (Y-(-1.5)).^2 < (0.1.^2);
-P0 = P0 ./ sum(P0(:));
+% P0 = (X-0).^2 + (Y-(-1.5)).^2 < (0.1.^2);
+% P0 = P0 ./ sum(P0(:));
+P0 = zeros(numel(X), 1);
+P0(knnsearch([X(:), Y(:)], fixedPts(2,:))) = 1;
 
 dirBC = [bdyIDx, zeros(size(bdyIDx))]; % Dirichlet boundary conditions
-timeSpan = [0 15]; % Time span for integration
+timeSpan = [0 5]; % Time span for integration
 FPType = 'Forward';
 
 [FPSol, FPO] = solveFokkerPlanck2DFD(X, Y, P0, 'U', reshape(U, size(X)), ...

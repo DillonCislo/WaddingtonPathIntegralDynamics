@@ -738,6 +738,7 @@ if (numel(branchIDx(~rmIDx)) > 1)
 
             % Update the nearest neighbor distance list
             activeBranchIDx = branchID(~rmIDx);
+            if (numel(activeBranchIDx) == 1), break; end
             [nnIDx, nnDists] = knnsearch( X(activeBranchIDx, :), ...
                 X(activeBranchIDx, :), 'k', 2 );
             nnDists = nnDists(:,2);

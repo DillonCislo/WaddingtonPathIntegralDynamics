@@ -20,7 +20,7 @@ function diffCoordsOOS = nystroemOOS(XOOS, X, diffCoords, lambda, ...
 %                           in the 'diffusionMap' function
 %
 %       - lambda:           numEigs x 1 or (numEigs+1) x 1 vector of
-%                           diffusioneigenvalues. If numel(lambda) ==
+%                           diffusion eigenvalues. If numel(lambda) ==
 %                           numEigs+1, we automatically remove the leading
 %                           constant eigenvalue == 1.
 %

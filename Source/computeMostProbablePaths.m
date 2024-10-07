@@ -81,7 +81,10 @@ end
 % COMPUTE PROBABLE PATHS
 %--------------------------------------------------------------------------
 
-diffGraph = digraph(-log(T));
+% NOTE: MATLAB's 'digraph(A)' takes an adjacency matrix where A(i,j) is the
+% edge weight from node i->j, which is the OPPOSITE of our transition
+% matrix convention -- hence the transpose
+diffGraph = digraph(-log(T.'));
 
 allPaths = cell(numPairs, 1);
 allPathWeights = cell(numPairs, 1);

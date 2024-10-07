@@ -87,7 +87,7 @@ validateattributes(sigma, {'numeric'}, {'scalar', ...
 
 % Optional Input Processing -----------------------------------------------
 
-weights = ones(numData, 1) / numData;
+weights = ones(numData, 1) ./ numData;
 verbose = false;
 excludeSelf = false;
 selfTol = 1e-14;

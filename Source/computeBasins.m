@@ -1,8 +1,8 @@
 function [basinProb, basinCounts, basinIDx, incPointIDx] = computeBasins( ...
     X, T, pointProb, basinLocIDx, varargin)
 %COMPUTEBASINS Assigns points in an input point cloud to a discrete set of
-%"basin" locations based on a user specified distance measure and computes
-%the total probability for each basin.
+%"basin" locations based on a user specified method and computes the total
+%probability for each basin.
 %
 %   INPUT PARAMETERS:
 %
@@ -20,19 +20,42 @@ function [basinProb, basinCounts, basinIDx, incPointIDx] = computeBasins( ...
 %
 %   OPTIONAL INPUT PARAMETERS (Name, Value)-Pairs:
 %
-%       - ('DistanceMatrix', distMatrix = []): #N x #N pairwise distance
-%       matrix, i.e. distMatrix(i,j) is the distance between cell i and
-%       cell j
-%
-%       - ('DistanceMethod', distMethod = 'euclidean'): The method by which
-%       distance from each point in the cloud to a basin location is
-%       calculated:
+%       - ('BasinMethod', basinMethod = 'expectedValue'): The method by
+%       which each point in the cloud is associated to a basin:
 %                   
-%           (1) 'euclidean' is just a raw Euclidean distance between points
-%           (2) 'probability' computes the most probable path from each
-%           point to each basin location using the transition matrix T and
-%           then assigns points to basins according to which point-to-basin
-%           transition is most probable
+%           (1) 'distance': points are associated to the closest basin
+%           relative to a given distance metric. A pre-computed distance
+%           matrix can be supplied. Otherwise, pairwise distances between
+%           points and basins are computed using 'pdist2'.
+%
+%           (2) 'mostProbablePath': computes the most probable path from
+%           each point to each basin location using the transition matrix T
+%           and then assigns points to basins according to which
+%           point-to-basin transition is most probable. This method does
+%           not really have a great interpretation from a stochastic
+%           dynamics perspective and should probably be avoided.
+%
+%           (3) 'expectedValue' (*): computes the probability of a random
+%           walk (that starts at time s <= t and evolves according to T) of
+%           reaching the basin point at time t. This is effectively solving
+%           the backwards Kolmogorov equation and is the most principled
+%           method for computing actual basins of attraction.
+%
+%       - ('NumSteps', numSteps = 5): The number of backwards steps used to
+%       compute the solution to the backwards Kolmogorov equation if
+%       basinMethod == 'expectedValue'. This value should be large enough
+%       for expected values of distant points to be non-zero, but small
+%       enough to not smear out probabilities.
+%
+%       - ('DistanceMatrix', distMatrix = []): #N x #N pairwise feature
+%       space distance matrix, i.e. distMatrix(i,j) is the distance between
+%       cell i and cell j. NOTE: This input is only used if basinMethod
+%       == 'distance'! Otherwise the necessary fields are computed from
+%       the transition matrix input.
+%
+%       - ('DistanceType', distType = 'euclidean'): The distance metric
+%       used to compute the pairwise feature space distance between points
+%       if basinMethod == 'distance'. See 'pdist2' for more details.
 %
 %       - ('ProbabilityThreshold', probThreshold = 0): The threshold above
 %       which points are included in the aggregation of basin probabilities
@@ -107,15 +130,18 @@ numBasins = numel(basinLocIDx);
 % OPTIONAL INPUT PROCESSING -----------------------------------------------
 
 distMatrix = [];
-distMethod = 'euclidean';
+distType = 'euclidean';
+basinMethod = 'expectedvalue';
+numSteps = 5;
 probThreshold = 0;
 mergeBasins = {};
 excludeFromBasins = [];
 
-allDistMethods = {'euclidean', 'probability'};
+allBasinMethods = {'distance', 'mostprobablepath', 'expectedvalue'};
 
-supportedOptions = {'DistanceMatrix', 'DistanceMethod', ...
-    'ProbabilityThreshold', 'MergeBasins', 'ExcludeFromBasins'};
+supportedOptions = {'DistanceMatrix', 'DistanceType', ...
+    'BasinMethod', 'NumSteps', 'ProbabilityThreshold', ...
+    'MergeBasins', 'ExcludeFromBasins'};
 checkSupportedOptions(supportedOptions, varargin);
 
 for i = 1:length(varargin)
@@ -132,12 +158,26 @@ for i = 1:length(varargin)
         end
     end
 
-    if strcmpi(varargin{i}, 'DistanceMethod')
-        distMethod = lower(varargin{i+1});
-        validateattributes(distMethod, {'char'}, {'vector'}, ...
-            'computeBasins', 'distMethod');
-        assert(ismember(distMethod, allDistMethods), ...
-            'Invalid distance method supplied');
+    if strcmpi(varargin{i}, 'DistanceType')
+        distType = lower(varargin{i+1});
+        validateattributes(distType, {'char'}, {'vector'}, ...
+            'computeBasins', 'distType');
+    end
+
+
+    if strcmpi(varargin{i}, 'BasinMethod')
+        basinMethod = lower(varargin{i+1});
+        validateattributes(basinMethod, {'char'}, {'vector'}, ...
+            'computeBasins', 'basinMethod');
+        assert(ismember(basinMethod, allBasinMethods), ...
+            'Invalid basin method supplied');
+    end
+
+    if strcmpi(varargin{i}, 'NumSteps')
+        numSteps = varargin{i+1};
+        validateattributes(numSteps, {'numeric'}, {'scalar', ...
+            'positive', 'finite', 'real', 'integer'}, ...
+            'computeBasins', 'numSteps');
     end
 
     if strcmpi(varargin{i}, 'ProbabilityThreshold')
@@ -203,7 +243,7 @@ end
 
 incPointIDx = (pointProb > probThreshold);
 
-if strcmpi(distMethod, 'euclidean')
+if strcmpi(basinMethod, 'distance')
 
     if isempty(distMatrix)
 
@@ -211,24 +251,38 @@ if strcmpi(distMethod, 'euclidean')
             'OR explicit point cloud coordinates']);
 
         % basinIDx = knnsearch(X(basinLocIDx, :), X);
-        distMatrix = pdist2(X, X(basinLocIDx, :), 'euclidean');
+        distMatrix = pdist2(X, X(basinLocIDx, :), distType);
 
     else
 
         distMatrix = distMatrix(:, basinLocIDx);
+
     end
 
-elseif strcmpi(distMethod, 'probability')
+elseif strcmpi(basinMethod, 'mostProbablePath')
 
     assert(~isempty(T), 'Please supply a transition matrix');
 
-    diffGraph = digraph(-log(T));
+    % NOTE: MATLAB's 'digraph(A)' takes an adjacency matrix where A(i,j) is
+    % the edge weight from node i->j, which is the OPPOSITE of our
+    % transition matrix convention
+    diffGraph = digraph(-log(T.'));
     distMatrix = distances(diffGraph, basinLocIDx, ...
         'Method', 'positive').';
 
+elseif strcmpi(basinMethod, 'expectedValue')
+
+    assert(~isempty(T), 'Please supply a transition matrix');
+
+    distMatrix = zeros(numPoints, numel(basinLocIDx));
+    distMatrix(basinLocIDx + (0:(numel(basinLocIDx)-1)).' .* numPoints) = 1;
+    for i = 1:numSteps
+        distMatrix = (T.') * distMatrix;
+    end
+
 else
 
-    error('Invalid distance method supplied')
+    error('Invalid basin method supplied')
 
 end
 
@@ -237,7 +291,14 @@ for i = 1:numel(mergeBasins)
 
     mergeIDx = mergeBasins{i};
 
-    distMatrix(:, mergeIDx(1)) = min(distMatrix(:, mergeIDx), [], 2);
+    if ismember(basinMethod, {'distance', 'mostprobablepath'})
+        distMatrix(:, mergeIDx(1)) = min(distMatrix(:, mergeIDx), [], 2);
+    elseif strcmpi(basinMethod, 'expectedvalue')
+        distMatrix(:, mergeIDx(1)) = max(distMatrix(:, mergeIDx), [], 2);
+    else
+        error('Invalid basin method supplied');
+    end
+
     distMatrix(:, mergeIDx(2:end)) = NaN;
 
     if ~isempty(excludeFromBasins)
@@ -257,7 +318,13 @@ if ~isempty(excludeFromBasins)
     distMatrix(excludeFromBasins) = Inf;
 end
 
-[~, basinIDx] = min(distMatrix, [], 2);
+if ismember(basinMethod, {'distance', 'mostprobablepath'})
+    [~, basinIDx] = min(distMatrix, [], 2);
+elseif strcmpi(basinMethod, 'expectedvalue')
+    [~, basinIDx] = max(distMatrix, [], 2);
+else
+    error('Invalid basin method supplied');
+end
 
 % Handle basin mergers (OLD METHOD)
 % [~, basinIDx] = min(distMatrix, [], 2);
