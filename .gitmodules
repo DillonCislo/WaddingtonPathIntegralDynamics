@@ -4,3 +4,6 @@
 [submodule "External/BrewerMap"]
 	path = External/BrewerMap
 	url = https://github.com/DrosteEffect/BrewerMap.git
+[submodule "External/crameri"]
+	path = External/crameri
+	url = https://github.com/chadagreene/crameri.git
