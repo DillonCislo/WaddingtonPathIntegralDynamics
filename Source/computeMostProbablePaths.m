@@ -1,5 +1,5 @@
 function [allPaths, allPathWeights, allPathLengths] = ...
-    computeMostProbablePaths(X, T, pairIDx, distMatrix)
+    computeMostProbablePaths(X, T, pairIDx, distMatrix, varargin)
 %COMPUTEMOSTPROBABLEPATHS Computes the most probable paths between pairs of
 %points given a (right Markov) transition matrix defined on those points
 %
@@ -17,6 +17,13 @@ function [allPaths, allPathWeights, allPathLengths] = ...
 %       - distMatrix:   #N x #N pairwise distance matrix, i.e.
 %                       distMatrix(i,j) is the distance between cell i and
 %                       cell j
+%
+%   OPTIONAL INPUT PARAMETERS:
+%
+%       - ('LogTransitionMatrix', logT = []): #N x #N log transition
+%       matrix. Used for stable computation of graph edge weights with
+%       small temperatures/scalar metrics. This overrides the 'T' input if
+%       supplied
 %
 % 	OUTPUT PARAMETERS:
 %
@@ -64,10 +71,14 @@ end
 assert(~(isempty(X) && isempty(distMatrix)), ['You must supply ' ...
     'either a complete input point set or a distance matrix']);
 
-validateattributes(T, {'numeric'}, {'2d', 'finite', 'real', ...
-    'nrows', numPoints, 'ncols', numPoints})
-if ( max(abs(sum(T,1) - 1)) > 1e-12 )
-    warning('Input transition matrix is NOT properly normalized');
+if ~isempty(T)
+
+    validateattributes(T, {'numeric'}, {'2d', 'finite', 'real', ...
+        'nrows', numPoints, 'ncols', numPoints})
+    if ( max(abs(sum(T,1) - 1)) > 1e-12 )
+        warning('Input transition matrix is NOT properly normalized');
+    end
+
 end
 
 validateattributes(pairIDx, {'numeric'}, {'2d', 'finite', 'real', ...
@@ -77,6 +88,31 @@ if (size(unique(pairIDx, 'rows'), 1) ~= numPairs)
     warning('Input pair ID list does not appear to have unique entries');
 end
 
+% OPTIONAL INPUT PROCESSING -----------------------------------------------
+
+logT = [];
+
+supportedOptions = {'LogTransitionMatrix'};
+checkSupportedOptions(supportedOptions, varargin);
+
+for i = 1:length(varargin)
+
+    if isa(varargin{i}, 'double'), continue; end
+    if isa(varargin{i}, 'logical'), continue; end
+
+    if strcmpi(varargin{i}, 'LogTransitionMatrix')
+        logT = varargin{i+1};
+        if ~isempty(logT)
+            validateattributes(logT, {'numeric'}, {'2d', 'finite', ...
+                'real', 'nrows', numPoints, 'ncols', numPoints})
+        end
+    end
+
+end
+
+assert(~(isempty(T) && isempty(logT)), ['You must supply either a ' ...
+    'transition matrix OR a log transition matrix']);
+
 %--------------------------------------------------------------------------
 % COMPUTE PROBABLE PATHS
 %--------------------------------------------------------------------------
@@ -84,7 +120,11 @@ end
 % NOTE: MATLAB's 'digraph(A)' takes an adjacency matrix where A(i,j) is the
 % edge weight from node i->j, which is the OPPOSITE of our transition
 % matrix convention -- hence the transpose
-diffGraph = digraph(-log(T.'));
+if ~isempty(logT)
+    diffGraph = digraph(-logT.');
+else
+    diffGraph = digraph(-log(T.'));
+end
 
 allPaths = cell(numPairs, 1);
 allPathWeights = cell(numPairs, 1);
@@ -98,7 +138,11 @@ for i = 1:numPairs
     if ~isempty(curPath)
         curPathWeights = nan(size(curPath,1), 1);
         for j = 1:size(curPath,1)
-            curPathWeights(j) = T(curPath(j,2), curPath(j,1));
+            if ~isempty(logT)
+                curPathWeights(j) = exp(logT(curPath(j,2), curPath(j,1)));
+            else
+                curPathWeights(j) = T(curPath(j,2), curPath(j,1));
+            end
         end
         allPathWeights{i} = curPathWeights;
     end
