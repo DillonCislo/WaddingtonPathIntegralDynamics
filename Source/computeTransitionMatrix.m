@@ -241,8 +241,10 @@ end
 
 if useGPU, try gpuDevice; catch, useGPU = false; end; end
 
-assert(~(isempty(X) && isempty(distMatrix)), ['You have to supply ' ...
-    'either a complete input point set or a distance matrix']);
+assert(~(isempty(X) && isempty(distMatrix) && isempty(precompT)), ...
+    ['You have to supply either a complete input point set or ' ...
+    'a distance matrix or a precomputed sum-square-distance matrix ' ...
+    '(precompT)']);
 
 %--------------------------------------------------------------------------
 % COMPUTE TRANSITION MATRIX
@@ -300,13 +302,13 @@ T = exp(T);
 if ~isempty(volumeElement)
 
     T = volumeElement .* T;
+    if (nargout > 1), volumeElement = gather(volumeElement); end
 
 else
 
     if strcmpi(volumeType, 'graphlaplacian')
 
         T = exp(U0 ./ D0) .* T;
-
         if (nargout > 1), volumeElement = gather(exp(U0 ./ D0)); end
 
     elseif strcmpi(volumeType, 'laplacebeltrami')
@@ -329,7 +331,6 @@ else
         if useGPU, DAlpha = gpuArray(DAlpha); end
 
         T = DAlpha .* T;
-
         if (nargout > 1), volumeElement = gather(DAlpha); end
 
     else
