@@ -41,8 +41,13 @@ function [basinProb, basinCounts, basinIDx, incPointIDx] = computeBasins( ...
 %           the backwards Kolmogorov equation and is the most principled
 %           method for computing actual basins of attraction.
 %
-%       - ('NumSteps', numSteps = 5): The number of backwards steps used to
-%       compute the solution to the backwards Kolmogorov equation if
+%       - ('LogTransitionMatrix', logT = []): #N x #N log transition
+%       matrix. Used for stable computation of graph edge weights with
+%       small temperatures/scalar metrics. This overrides the 'T' input if
+%       supplied
+%
+%       - ('NumSteps', numSteps = 50): The number of backwards steps used
+%       to compute the solution to the backwards Kolmogorov equation if
 %       basinMethod == 'expectedValue'. This value should be large enough
 %       for expected values of distant points to be non-zero, but small
 %       enough to not smear out probabilities.
@@ -74,6 +79,9 @@ function [basinProb, basinCounts, basinIDx, incPointIDx] = computeBasins( ...
 %       - ('ExcludeFromBasins', excludeFromBasins = []): #N x #B logical
 %       matrix. If excludeFromBasins(i,j) is true, the ith point cannot be
 %       assigned to the jth basin.
+%
+%       - ('UseGPU', useGPU = true): Whether or not to perform computations
+%       on a GPU
 %
 %   OUTPUT PARAMETERS:
 %
@@ -132,16 +140,18 @@ numBasins = numel(basinLocIDx);
 distMatrix = [];
 distType = 'euclidean';
 basinMethod = 'expectedvalue';
-numSteps = 5;
+numSteps = 50;
 probThreshold = 0;
 mergeBasins = {};
 excludeFromBasins = [];
+logT = [];
+useGPU = true;
 
 allBasinMethods = {'distance', 'mostprobablepath', 'expectedvalue'};
 
 supportedOptions = {'DistanceMatrix', 'DistanceType', ...
-    'BasinMethod', 'NumSteps', 'ProbabilityThreshold', ...
-    'MergeBasins', 'ExcludeFromBasins'};
+    'BasinMethod', 'NumSteps', 'ProbabilityThreshold', 'UseGPU'...
+    'MergeBasins', 'ExcludeFromBasins', 'LogTransitionMatrix'};
 checkSupportedOptions(supportedOptions, varargin);
 
 for i = 1:length(varargin)
@@ -171,6 +181,14 @@ for i = 1:length(varargin)
             'computeBasins', 'basinMethod');
         assert(ismember(basinMethod, allBasinMethods), ...
             'Invalid basin method supplied');
+    end
+
+    if strcmpi(varargin{i}, 'LogTransitionMatrix')
+        logT = varargin{i+1};
+        if ~isempty(logT)
+            validateattributes(logT, {'numeric'}, {'2d', 'finite', ...
+                'real', 'nrows', numPoints, 'ncols', numPoints})
+        end
     end
 
     if strcmpi(varargin{i}, 'NumSteps')
@@ -208,6 +226,12 @@ for i = 1:length(varargin)
         end
     end
 
+    if strcmpi(varargin{i}, 'UseGPU')
+        useGPU = varargin{i+1};
+        validateattributes(useGPU, {'logical'}, {'scalar'}, ...
+            'computeLogTransitionMatrix', 'useGPU');
+    end
+
 end
 
 if ~isempty(mergeBasins)
@@ -237,6 +261,8 @@ if ~isempty(mergeBasins)
 
 end
 
+if useGPU, try gpuDevice; catch, useGPU = false; end; end
+
 %--------------------------------------------------------------------------
 % COMPUTE BASINS
 %--------------------------------------------------------------------------
@@ -261,24 +287,60 @@ if strcmpi(basinMethod, 'distance')
 
 elseif strcmpi(basinMethod, 'mostProbablePath')
 
-    assert(~isempty(T), 'Please supply a transition matrix');
+    assert(~(isempty(T) && isempty(logT)), ['You must supply either a ' ...
+        'transition matrix OR a log transition matrix']);
 
     % NOTE: MATLAB's 'digraph(A)' takes an adjacency matrix where A(i,j) is
     % the edge weight from node i->j, which is the OPPOSITE of our
     % transition matrix convention
-    diffGraph = digraph(-log(T.'));
+    if ~isempty(logT)
+        diffGraph = digraph(-logT.');
+    else
+        diffGraph = digraph(-log(T.'));
+    end
     distMatrix = distances(diffGraph, basinLocIDx, ...
         'Method', 'positive').';
 
 elseif strcmpi(basinMethod, 'expectedValue')
 
-    assert(~isempty(T), 'Please supply a transition matrix');
+    assert(~(isempty(T) && isempty(logT)), ['You must supply either a ' ...
+        'transition matrix OR a log transition matrix']);
 
     distMatrix = zeros(numPoints, numel(basinLocIDx));
     distMatrix(basinLocIDx + (0:(numel(basinLocIDx)-1)).' .* numPoints) = 1;
-    for i = 1:numSteps
-        distMatrix = (T.') * distMatrix;
+
+    if useGPU
+
+        distMatrix = gpuArray(distMatrix);
+        if ~isempty(T), T = gpuArray(T); end
+        if ~isempty(logT), logT = gpuArray(logT); end
+
     end
+
+    if ~isempty(logT)
+
+        % Log-stabilized reverse time evolution. There is no reason to
+        % change back out of the log domain here - log is a monotonic
+        % function
+        distMatrix = log(distMatrix);
+        for i = 1:numSteps
+            for j = 1:size(distMatrix, 2)
+                % NOTICE THE TRANSPOSE ON DIST MATRIX - necessary to
+                % account for how MATLAB broadcasting works
+                distMatrix(:,j) = logsumexp(logT.' + distMatrix(:,j).', 2);
+            end
+        end
+
+    else
+
+        % Standard reverse time evolution
+        for i = 1:numSteps
+            distMatrix = (T.') * distMatrix;
+        end
+
+    end
+
+    distMatrix = gather(distMatrix);
 
 else
 
