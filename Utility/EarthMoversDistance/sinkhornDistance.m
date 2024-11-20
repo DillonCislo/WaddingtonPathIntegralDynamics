@@ -359,6 +359,8 @@ if (nargin < 2)
 end
 
 xmax = max(x, [], dim);
+xmax(xmax == -Inf) = 0;
+
 e = exp(x - xmax);
 s = sum(e, dim);
 
