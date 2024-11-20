@@ -985,6 +985,7 @@ hold off
 title('Branch Size');
 ylabel('Number of Vertices in Branch');
 xlabel('Branch ID');
+xlim([1 numBranches]);
 
 subplot(2,2,3);
 hold on
@@ -997,6 +998,7 @@ hold off
 title('Branch Stability');
 ylabel('Sum of Densities in Branch');
 xlabel('Branch ID');
+xlim([1 numBranches]);
 
 subplot(2,2,4);
 
@@ -1033,6 +1035,7 @@ hold off
 title('Branch Spatial Proximity');
 ylabel('Branch Nearest Neighbor Distance');
 xlabel('Branch ID');
+xlim([1 numBranches]);
 
 
 end
