@@ -40,8 +40,8 @@ function pointDensity = gaussianKDE(P, Q, covK, bwK, verbose, weights, ...
 %                   relevant if a pre-computed distance matrix is supplied
 %                   and used
 %
-%       - excludeSelf: Whether to exlucde the self-point when data/query
-%       points intersect
+%       - excludeSelf:  Whether to exlucde the self-point when data/query
+%                       points intersect
 %
 %   OUTPUT PARAMETERS:
 %
