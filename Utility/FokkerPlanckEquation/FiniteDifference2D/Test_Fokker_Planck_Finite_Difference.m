@@ -4,18 +4,9 @@
 %
 %==========================================================================
 
-addpath(genpath('/home/dillon/Documents/MATLAB/gptoolbox'));
-addpath(genpath('/home/dillon/Documents/MATLAB/DiffusionMaps'));
-addpath(genpath('/home/dillon/Documents/MATLAB/BrewerMap'));
-addpath(genpath('/home/dillon/Documents/MATLAB/CGAL_Code'));
-addpath(genpath('/home/dillon/Documents/MATLAB/RicciFlow_MATLAB'));
-addpath(genpath('/home/dillon/Documents/MATLAB/GeometryCentralCode/PointCloudIDT'));
-addpath(genpath('/home/dillon/Documents/MATLAB/GeometryCentralCode/PointCloudLogMap'));
-addpath(genpath('/home/dillon/Documents/MATLAB/phasemap'));
-addpath(genpath('/home/dillon/Documents/MATLAB/mesh2d'));
-addpath(genpath('/home/dillon/Documents/MATLAB/GeometryCentralCode/PointCloudHeatMethod'));
-addpath(genpath('/home/dillon/Documents/MATLAB/PointCloudBoundaryEstimation'));
-addpath('/home/dillon/Documents/MATLAB/tubular/utility/mesh_handling');
+[scriptDir, ~, ~] = fileparts(matlab.desktop.editor.getActiveFilename);
+addpath(genpath(fullfile(scriptDir, '..', '..', '..')));
+clear scriptDir
 
 %% Generate Analytic Results for Specified Potential ======================
 clear; close all; clc;
@@ -117,6 +108,7 @@ close all; clc;
 % P0 = P0 ./ sum(P0(:));
 P0 = zeros(numel(X), 1);
 P0(knnsearch([X(:), Y(:)], fixedPts(2,:))) = 1;
+P0 = reshape(P0, size(X));
 
 dirBC = [bdyIDx, zeros(size(bdyIDx))]; % Dirichlet boundary conditions
 timeSpan = [0 5]; % Time span for integration
