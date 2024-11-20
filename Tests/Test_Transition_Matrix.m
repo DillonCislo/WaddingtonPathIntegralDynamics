@@ -21,7 +21,8 @@ assume(y, 'real');
 % Generate 2D potential ---------------------------------------------------
 
 % p3 = -0.75; p4 = 0.4; % Deep wells 
-p3 = -0.5; p4 = 0.1; % Shallow wells
+% p3 = -0.5; p4 = 0.1; % Shallow wells
+p3 = 0*0.5; p4 = 0*0.1; % Shallow wells
 
 % 3-well heteroclinic flip potential
 U = x.^4 + y.^4 + x.^3 - 2.*x.*y.^2 - x.^2 + p3*x + p4*y;
@@ -253,9 +254,9 @@ clear dtSODE
 %% Build Transition Matrix and Compute Most Probable Paths ================
 close all; clc;
 
-D = 0.025;
+D = 0.1;
 dt = 1e-2; % <---- THE DYNAMICAL TIME STEP
-scalarMetric = 1;
+scalarMetric = 0.025;
 simU = UFunc(simX(:,1), simX(:,2));
 
 volumeType = 'GraphLaplacian';
@@ -269,7 +270,7 @@ else
 end
 
 T = computeTransitionMatrix(simX, simU, dt, ...
-    'PointDiffusionCoefficient', D, 'DiffusionCoefficient', D, ...
+    'PointDiffusionCoefficient', D0, 'DiffusionCoefficient', D, ...
     'ClipThreshold', 1e-12, 'StrictNormalization', true, 'useGPU', true, ...
     'PointPotential', simU0, 'VolumeElementType', volumeType, ...
     'ScalarMetric', scalarMetric);
@@ -288,7 +289,7 @@ pathPairIDx = [knnsearch(simX, fixedPts([1, 2], :)), ...
 basinLocIDx = knnsearch(simX, fixedPts(fpLambda < 0, :));
 [basinProb, basinCounts, basinIDx] = computeBasins(simX, T, ...
     ones(numPoints, 1) ./ numPoints, basinLocIDx, ...
-    'DistanceMethod', 'Probability');
+    'BasinMethod', 'ExpectedValue');
 
 for i = 1:numel(basinLocIDx)
     fprintf('Total Probability for (%0.2f, %0.2f) = %0.4f\n', ...
