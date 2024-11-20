@@ -4,18 +4,9 @@
 %
 %==========================================================================
 
-addpath(genpath('/home/dillon/Documents/MATLAB/gptoolbox'));
-addpath(genpath('/home/dillon/Documents/MATLAB/DiffusionMaps'));
-addpath(genpath('/home/dillon/Documents/MATLAB/BrewerMap'));
-addpath(genpath('/home/dillon/Documents/MATLAB/CGAL_Code'));
-addpath(genpath('/home/dillon/Documents/MATLAB/RicciFlow_MATLAB'));
-addpath(genpath('/home/dillon/Documents/MATLAB/GeometryCentralCode/PointCloudIDT'));
-addpath(genpath('/home/dillon/Documents/MATLAB/GeometryCentralCode/PointCloudLogMap'));
-addpath(genpath('/home/dillon/Documents/MATLAB/phasemap'));
-addpath(genpath('/home/dillon/Documents/MATLAB/mesh2d'));
-addpath(genpath('/home/dillon/Documents/MATLAB/GeometryCentralCode/PointCloudHeatMethod'));
-addpath(genpath('/home/dillon/Documents/MATLAB/PointCloudBoundaryEstimation'));
-addpath('/home/dillon/Documents/MATLAB/tubular/utility/mesh_handling');
+[scriptDir, ~, ~] = fileparts(matlab.desktop.editor.getActiveFilename);
+addpath(genpath(fullfile(scriptDir, '..', '..', '..')));
+clear scriptDir
 
 %% Generate Analytic Results for Specified Potential ======================
 clear; close all; clc;
@@ -662,7 +653,7 @@ pathPairIDx = [knnsearch(simX, fixedPts([2, 1], :)), ...
 basinLocIDx = knnsearch(simX, fixedPts(fpLambda < 0, :));
 [basinProb, basinCounts, basinIDx] = computeBasins(simX, T, ...
     ones(numPoints, 1) ./ numPoints, basinLocIDx, ...
-    'DistanceMethod', 'Probability');
+    'BasinMethod', 'ExpectedValue');
 
 for i = 1:numel(basinLocIDx)
     fprintf('Total Probability for (%0.2f, %0.2f) = %0.4f\n', ...
