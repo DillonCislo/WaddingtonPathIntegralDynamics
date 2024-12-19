@@ -1,4 +1,4 @@
-function [allPaths, fixPointIDx, allPathLengths, allPathWeights] = ...
+function [allPaths, fixPointIDx, fixInPathIDx, allPathLengths, allPathWeights] = ...
     resplitPathsAtSaddles(oldPaths, U, isSaddle, varargin)
 %RESPLITPATHSATSADDLES This function re-splits a set of paths between
 %points in a cloud that run between sinks of a function defined on the
@@ -38,9 +38,14 @@ function [allPaths, fixPointIDx, allPathLengths, allPathWeights] = ...
 %       fixed point list is supplied, it is extracted as the sorted, unique
 %       list of path end points.
 %
-%       - ('FixInPathIDx', fixInPathIDx = []): #P x 2 matrix of indices
+%       - ('FixInPathIDx', oldFixInPathIDx = []): #P x 2 matrix of indices
 %       into oldFixPointIDx the define the end points of each path. If no
 %       matrix is supplied, it is deduced from oldPaths and oldFixPointIDx
+%
+%       - ('InvalidSaddleIDx', invalidSaddleIDx = []): A list of points in
+%       the cloud that cannot be used as saddles. For example these might
+%       include points that are too close to sink. Can be supplied as a
+%       list of IDs or as a logical vector with #N elements
 %
 %
 %   OUTPUT PARAMETERS:
@@ -50,6 +55,9 @@ function [allPaths, fixPointIDx, allPathLengths, allPathWeights] = ...
 %
 %       - fixPointIDx:      #FP x 1 vector of indices into X indicating the
 %                           fixed points that define the resliced paths.
+%
+%       - fixInPathIDx:     #P x 2 matrix of indices fixPointIDx the define
+%                           the end points of each resliced path.
 %
 %       - allPathWeights:   #Px1 cell array. allPathWeights{i} is a vector
 %                           of path edge weights (i.e. allPathWeights{i}(j)
@@ -88,13 +96,15 @@ assert(maxPathPointID <= numPoints, 'Path contains an out-of-bounds ID');
 
 % OPTIONAL INPUT PROCESSING -----------------------------------------------
 oldFixPointIDx = [];
-fixInPathIDx = [];
+oldFixInPathIDx = [];
 X = [];
 T = [];
 distMatrix = [];
+invalidSaddleIDx = [];
 
 supportedOptions = {'DistanceMatrix', 'PointLocations', ...
-    'TransitionMatrix', 'FixPointIDx', 'FixInPathIDx'};
+    'TransitionMatrix', 'FixPointIDx', 'FixInPathIDx', ...
+    'InvalidSaddleIDx'};
 checkSupportedOptions(supportedOptions, varargin);
 
 for i = 1:length(varargin)
@@ -146,11 +156,29 @@ for i = 1:length(varargin)
     end
 
     if strcmpi(varargin{i}, 'FixInPathIDx')
-        fixInPathIDx = varargin{i+1};
-        if ~isempty(fixInPathIDx)
-            validateattributes(fixInPathIDx, {'numeric'}, {'2d', ...
+        oldFixInPathIDx = varargin{i+1};
+        if ~isempty(oldFixInPathIDx)
+            validateattributes(oldFixInPathIDx, {'numeric'}, {'2d', ...
                 'positive', 'integer', 'finite', 'real', 'ncols', 2}, ...
                 mfilename, 'fixInPathIDx');
+        end
+    end
+
+    if strcmpi(varargin{i}, 'InvalidSaddleIDx')
+        invalidSaddleIDx = varargin{i+1};
+        if ~isempty(invalidSaddleIDx)
+            if islogical(invalidSaddleIDx)
+                validateattributes(invalidSaddleIDx, {'logical'}, ...
+                    {'vector', 'numel', numPoints}, ...
+                    mfilename, 'invalidSaddleIDx');
+                invalidSaddleIDx = reshape(find(invalidSaddleIDx), [], 1);
+            else
+                validateattributes(invalidSaddleIDx, {'numeric'}, ...
+                    {'vector', 'positive', 'finite', 'real', ...
+                    'integer', '<=', numPoints}, ...
+                    mfilename, 'invalidSaddleIDx');
+                invalidSaddleIDx = invalidSaddleIDx(:);
+            end
         end
     end
 
@@ -158,6 +186,7 @@ end
 
 % PROCESS FIXED POINTS ----------------------------------------------------
 fixPointIDx = oldFixPointIDx;
+fixInPathIDx = oldFixInPathIDx;
 
 % Extract fixed point IDs if necessary
 if isempty(fixPointIDx)
@@ -247,10 +276,11 @@ primalPaths = [primalPaths; oldPaths(isSinkToSinkPath)];
 % paths
 allPathVertexIDx = unique(vertcat(oldPaths{:}));
 appearanceCount = cellfun(@(x) ismember(allPathVertexIDx, x), ...
-    oldPaths, 'Uni', false);
+    primalPaths, 'Uni', false);
 appearanceCount = sum(horzcat(appearanceCount{:}), 2);
 validSaddleIDx = allPathVertexIDx(appearanceCount == 1);
 validSaddleIDx = setdiff(validSaddleIDx, fixPointIDx(~isSaddle));
+validSaddleIDx = setdiff(validSaddleIDx, invalidSaddleIDx);
 
 % Re-split primal paths that link sinks to saddles to sinks
 for i = 1:sum(isSaddle)
@@ -281,7 +311,7 @@ end
 numPaths = numel(allPaths);
 
 allPathLengths = {};
-if ((nargout > 2) && ~(isempty(X) && isempty(distMatrix)))
+if ((nargout > 3) && ~(isempty(X) && isempty(distMatrix)))
 
     allPathLengths = cell(numPaths, 1);
     for i = 1:numPaths
@@ -304,7 +334,7 @@ if ((nargout > 2) && ~(isempty(X) && isempty(distMatrix)))
 end
 
 allPathWeights = {};
-if ((nargout > 3) && ~isempty(T))
+if ((nargout > 4) && ~isempty(T))
 
     allPathWeights = cell(numPaths, 1);
     for i = 1:numPaths
