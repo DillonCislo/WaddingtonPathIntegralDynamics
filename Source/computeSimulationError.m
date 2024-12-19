@@ -75,19 +75,19 @@ end
 
 if strcmpi(errorType, 'symKLD')
     
-    err = (measProb - simProb) .* log(measProb ./ simProb);
+    err = (measProb - simProb) .* log2(measProb ./ simProb);
     err(isnan(err)) = 0;
     err = sum(err, 1);
     
 elseif strcmpi(errorType, 'simKLD')
     
-    err = simProb .* log(simProb ./ measProb);
+    err = simProb .* log2(simProb ./ measProb);
     err(isnan(err)) = 0;
     err = sum(err, 1);
     
 elseif strcmpi(errorType, 'dataKLD')
     
-    err = measProb .* log(measProb ./ simProb);
+    err = measProb .* log2(measProb ./ simProb);
     err(isnan(err)) = 0;
     err = sum(err, 1);
     
