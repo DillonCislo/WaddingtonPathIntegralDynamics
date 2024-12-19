@@ -1,4 +1,4 @@
-function D = sinkhornDistance(r, C, varargin)
+function [D, T] = sinkhornDistance(r, C, varargin)
 %SINKHORNDISTANCE Fast computation of the Sinkhorn distance, i.e. entropy
 %regularized Earth Mover's Distance (EMD), following 'Sinkhorn Distances:
 %Lightspeed Computation of Optimal Transport' by Marco Cuturi (2013). This
@@ -62,6 +62,10 @@ function D = sinkhornDistance(r, C, varargin)
 %
 %       - D:        1 x numDists row vector, where D(j) is the Sinkhorm
 %                   distace between r and C(:,j)
+%
+%       - T:        numPts x numPts x numDists array where T(:,:,j) is the
+%                   entropy regularized optimal transport plan between r
+%                   and C(:,j)
 %
 %   by Dillon Cislo 2024/08/19
 
@@ -332,6 +336,29 @@ elseif strcmpi(stability, 'unstable')
 else
 
     error('Invalid stability option');
+
+end
+
+% Explicitly generate the optimal transport plan if desired
+T = [];
+if (nargout > 1)
+
+    if ~exist('K', 'var')
+        K = exp(-lambda .* M);
+        if useGPU, K = gpuArray(K); end
+    end
+
+    T = nan(numPoints, numPoints, numDists);
+    if useGPU, T = gpuArray(T); end
+
+    if (size(u,1) == 1), u = u.'; end
+    if (size(v,1) == 1), v = v.'; end
+
+    for j = 1:numDists
+        T(:,:,j) = u .* K .* v(:,j).';
+    end
+
+    T = gather(T);
 
 end
 
