@@ -291,7 +291,9 @@ end
 if ~isempty(volumeElement)
 
     logVol = log(volumeElement);
-    if (nargout > 1), volumeElement = gather(volumeElement); end
+    if (nargout > 1)
+        volumeElement = gather(volumeElement ./ numPoints);
+    end
 
 else
 

@@ -309,7 +309,9 @@ else
     if strcmpi(volumeType, 'graphlaplacian')
 
         T = exp(U0 ./ D0) .* T;
-        if (nargout > 1), volumeElement = gather(exp(U0 ./ D0)); end
+        if (nargout > 1)
+            volumeElement = gather(exp(U0 ./ D0) ./ numPoints);
+        end
 
     elseif strcmpi(volumeType, 'laplacebeltrami')
 
