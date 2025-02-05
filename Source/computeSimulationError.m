@@ -17,7 +17,7 @@ function err = computeSimulationError(measProb, simProb, errorType, X)
 %           probabilities D_KL(S||M). Heuristically, this divergence is
 %           mode seeking
 %
-%           - 'measKLD': K-L divergence relative to measured probabilities
+%           - 'dataKLD': K-L divergence relative to measured probabilities
 %           D_KL(M||S). Heuristically this divergence is mean seeking
 %
 %           - 'MSE': Normalized L-2 error || M - S ||^2 ./ || M ||^2
