@@ -1,25 +1,34 @@
-function [optErr, optFixHeights0, optScalarMetric0, ...
-    optFixHeights1, optScalarMetric1,optInterpParam, optTimeScales, ...
-    optTimes, optOutput] = fitStaticInterpolatedLandscapes( ...
+function [optErr, optFixHeights0, optD0, optScalarMetric0, ...
+    optFixHeights1, optD1, optScalarMetric1, optInterpParam, ...
+    optTimeScales, optTimes, optOutput] = fitStaticInterpolatedLandscapes( ...
     X, dataProb, dataTimes, dt, allPaths, varargin)
 %FITSTATICINTERPOLATEDLANDSCAPES Simultaneously fits three static dynamical
 %landscapes to a set of input time-series data on a shared manifold. For
-%the two "boundary" landscapes, the degrees of freedom to be fit are (1)
-%the heights of potential minima/saddles (stored in the same vector) (2) a
-%uniform scalar metric (literally a single scalar constant), and (3) an
-%(optional) constant re-scaling of time that matches simulation time to
-%physical time. The third landscape is produced by linearly interpolating
-%between the "boundary" landscapes. Explicitly we have:
+%the two "boundary" landscapes, the degrees of freedom to be fit are:
+%
+% (1) The heights of potential minima/saddles (stored in the same vector)
+% (2) A scalar (positive) diffusion constant D
+% (2) A uniform scalar metric (literally a single scalar constant), and
+% (3) An optional constant re-scaling of time that matches simulation time
+% to physical time.
+% 
+%The third landscape is produced by linearly interpolating between the
+%"boundary" landscapes and diffusion constants. Explicitly we have:
 %
 %   (U_b + U_int) = (1-c) * (U_b + U_i0) / g0 + c * (U_b + U_i1) / g1
+%   D = (1-c) * D0 + c * D1
 %
 %for some parameter 0 <= c <= 1. The inclusion of an explicit base
-%potential in the dynamical potential for the interpolated dynamics is made
-%for compatibility with underlying functions. Note that we absorb the
-%scalar metric for the interpolated dynamics into the dynamical potential.
-%Options are included to fix the scalar metrics, a subset of the
-%minima/saddle heights, or the interpolation parameter to user specified
-%values.
+%potential (shared across all three landscapes) in the dynamical potential
+%for the interpolated dynamics is made for compatibility with underlying
+%functions. Note that we absorb the scalar metric for the interpolated
+%dynamics into the dynamical potential. Also note that the variable 'D0'
+%(which typically refers the the point set diffusion coefficient in this
+%code base) is reserved here for the dynamical diffusion coefficient of the
+%potential landscape corresponding to c == 0 (we use 'psD0' to refer to the
+%point set diffusion coefficient instead). Options are included to fix the
+%diffusion constants, scalar metrics, a subset of the minima/saddle
+%heights, or the interpolation parameter to user specified values.
 %
 %   INPUT PARAMETERS:
 %
@@ -51,8 +60,8 @@ function [optErr, optFixHeights0, optScalarMetric0, ...
 %                       [0 1 2 ... (numSimTimes-1)] * dt
 %
 %       - allPaths:     #P x 1 cell array. allPaths{i} is an an ordered
-%                       et of point IDs defining that path. The end points
-%                       of each allPaths{i} correspond to the
+%                       list of point IDs defining that path. The end
+%                       points of each allPaths{i} correspond to the
 %                       minima/saddles in the point set. The ordering of
 %                       the values in the output 'fixHeights' is determined
 %                       by the sorted, unique IDs of the path end points
@@ -62,18 +71,14 @@ function [optErr, optFixHeights0, optScalarMetric0, ...
 %       - ('InitialGuess', initGuess = []); An initial guess for the
 %       parameters supplied as a vector of the form:
 %
-%           [ (heights0); (scalarMetric0); (timeScale0); ...
-%             (heights1); (scalarMetric1); (timeScale1);
-%             (interpParam); (timeScaleInt) ] 
+%           [ (heights0); (D0); (scalarMetric0); ...
+%             (heights1); (D1); (scalarMetric1); (interpParam) ]
 %
-%                       -OR-
-%
-%           [ (heights0); (scalarMetric0); ...
-%             (heights1); (scalarMetric1); (interpParam) ]
-%
-%       depending on the simulation time handling options. The user is
-%       responsible for ensuring the initial guess is feasible given the
-%       various imposed constraints
+%       The user is responsible for ensuring the initial guess is feasible
+%       given the various imposed constraints. NOTE: the time scale outputs
+%       for 'constant' time handling are always found by a suboptimization
+%       problem at each iteration and are not specified by the initial
+%       guess.
 %
 %       - ('InitialConditions', initConditions = {}): A three element cell
 %       array, corresponding to the dynamics for landscape 0, the
@@ -92,9 +97,21 @@ function [optErr, optFixHeights0, optScalarMetric0, ...
 %       determined from the 'allPaths' variable. This field must be
 %       specified in order to enforce the saddles.
 %
+%       - ('EnforcePositiveDiffusion', enforcePositiveD = true): Whether to
+%       set a bound constraint on the diffusion coefficient. Be sure to
+%       choose a good initial condition if you turn this off!
+%
+%       - ('EnforceIdenticalDiffusion', enforceIdenticalD = false): Whether
+%       to enforce an identical diffusion coefficient across all dynamical
+%       landscapes. TODO: NOT YET IMPLEMENTED!!!
+%
 %       - ('EnforcePositiveMetric', enforcePositiveMetric = true): Whether
 %       or not to set a bound constraint on the scalar metrics. Be sure to
 %       choose a good initial condition if you turn this off!
+%
+%       - ('EnforceIdenticalMetric', enforceIdenticalMetric = false):
+%       Whether to enforce an identical scalar metric across all dynamical
+%       landscapes TODO: NOT YET IMPLEMENTED!!!
 %
 %       - ('EnforceUnitInterpParam', enforceUnitInterpParam = true):
 %       Whether or not to bound the interpolation parameter between 0 and
@@ -103,7 +120,8 @@ function [optErr, optFixHeights0, optScalarMetric0, ...
 %       - ('EnforceSaddles', enforceSaddles = false): Whether or not to
 %       enforce the constraint that index-1 saddles have a greater
 %       potential height than the corresponding minima (i.e. prevent
-%       saddles from becoming minima)
+%       saddles from becoming minima). Unless you have strong prior
+%       knowledge of the system, this should generally be set to false.
 %
 %       - ('ConstHeightSum', constHeightSum = []): A user supplied constant
 %       that constrains the total sum of the minima/saddle heights. Can be
@@ -123,8 +141,11 @@ function [optErr, optFixHeights0, optScalarMetric0, ...
 %           matches the data chronology (i.e. the temporal ordering of the
 %           data points must match the temporal ordering of the simulation
 %           points). WARNING: This is currently only implemented in an
-%           approximate way. No guarantees are provided that this is the
-%           optimal causal matching
+%           approximate greedy way. No guarantees are provided that this is
+%           the optimal causal matching. Also, this may throw errors for
+%           random initial conditions far from the optimal values. Unless
+%           you have a good initial guess of the fit parameters, this
+%           should probably not be used.
 %
 %           - 'constant': Enforce a constand rescaling of physical time
 %           matching it to simulation time, i.e. (simulation time) = 
@@ -133,14 +154,20 @@ function [optErr, optFixHeights0, optScalarMetric0, ...
 %
 %       - ('ConstTimeScale', constTimeScale = []): A user supplied constant
 %       time scale that maps simulation time into physical time. If
-%       supplied, this property is held fixed over optimization Can be
+%       supplied, this property is held fixed over optimization. Can be
 %       supplied as a three element vector, where NaN entries correspond to
-%       no constraint.
+%       no constraint
 %
 %       - ('ConstFixedHeights', constFixHeights = []): A set of user
 %       supplied values for a subset of the minima/saddle heights, supplied
 %       a (numFixedPoints) x 2 vector. Non-NaN entries correspond to
 %       specified values. If supplied, these fields are held fixed over
+%       optimization
+%
+%       - ('ConstDiffusionCoefficient', constD = []): The diffusion
+%       coefficients for the dynamical drift-diffusion process. Can be
+%       supplied as a two element vector, where NaN entries correspond to
+%       no constraint. If supplied, this property is held fixed over
 %       optimization
 %
 %       - ('ConstScalarMetric', constScalarMetric = []): The uniform scalar
@@ -172,9 +199,9 @@ function [optErr, optFixHeights0, optScalarMetric0, ...
 %
 %       - ('ErrorType', errorType = 'symKLD'): The type of error metric to
 %       minimize. Total error is the average "per timepoint" error weighted
-%       using dataset specific weights. See 'computeSimulationError' below
-%       for more details. WARNING: Approximate earth mover's distance
-%       computation ('EMD') is VERY slow
+%       using dataset specific weights. See 'computeSimulationError' for
+%       specific options. WARNING: Approximate earth mover's distance
+%       computation ('EMD') is VERY slow -- effectively unusable.
 %
 %       - ('DataSetWeights', dataSetWeights = []): The relative weight of
 %       each data set to the total error computation. Weights should sum to
@@ -185,13 +212,9 @@ function [optErr, optFixHeights0, optScalarMetric0, ...
 %   You are allowed to set these for the sake of completeness, but you are
 %   strongly advised to just leave them equal to one
 %
-%       - ('DiffusionCoefficient', D = 1): The diffusion coefficient for
-%       the dynamical drift-diffusion process. Can also be supplied as a
-%       three element vector, corresponding to each dynamical process.
-%
-%       - ('PointDiffusionCoefficient', D0 = 1): The diffusion coefficient
-%       for the drift-diffusion process assumed to generate the input point
-%       set
+%       - ('PointDiffusionCoefficient', psD0 = 1): The diffusion
+%       coefficient for the drift-diffusion process assumed to generate the
+%       input point set
 %
 %   Manifold/Point Set/Potential Properties -------------------------------
 %   These fields are computed directly from (X, dt) if they are not
@@ -282,12 +305,18 @@ function [optErr, optFixHeights0, optScalarMetric0, ...
 %                           for landscape 0. Ordering in this list is 
 %                           determined from the 'allPaths' input variable
 %
+%       - optD0:            The optimized dynamical diffusion coefficient
+%                           landscape 0
+%
 %       - optScalarMetric0: The optimized uniform scalar metric for
 %                           landscape 0
 %
 %       - optFixHeights1:   1 x #H list of optimizes minima/saddle heights
 %                           for landscape 1. Ordering in this list is 
 %                           determined from the 'allPaths' input variable
+%
+%       - optD1:            The optimized dynamical diffusion coefficient
+%                           for landscape 1
 %
 %       - optScalarMetric1: The optimized uniform scalar metric for
 %                           landscape 1
@@ -340,7 +369,8 @@ validateattributes(dt, {'numeric'}, {'scalar', 'positive', ...
 validateattributes(allPaths, {'cell'}, {'vector'});
 numPaths = numel(allPaths);
 cellfun(@(x) validateattributes(x, {'numeric'}, {'vector', 'integer', ...
-    'positive', 'finite', 'real'}), allPaths, 'Uni', false);
+    'positive', 'finite', 'real', '<=', numPoints}), ...
+    allPaths, 'Uni', false);
 assert(all(cellfun(@(x) numel(x) > 1, allPaths, 'Uni', true)), ...
     'Paths must have at least two points');
 
@@ -365,11 +395,15 @@ for i = 1:3, initConditions{i} = cell(numDataSets(i), 1); end
 numSimTimes = 500;
 isSaddle = false(1, numFixPoints);
 enforceSaddles = false;
+enforcePositiveDiffusion = true;
+enforceIdenticalDiffusion = false;
 enforcePositiveMetric = true;
+enforceIdenticalMetric = false;
 enforceUnitInterpParam = true;
 constHeightSum = [NaN NaN];
 simTimeHandling = 'none';
 constFixHeights = nan(numFixPoints, 2);
+constD = [NaN NaN];
 constScalarMetric = [NaN NaN];
 constInterpParam = NaN;
 precomputeQuadProg = true;
@@ -384,8 +418,7 @@ allErrorTypes = lower({'symKLD', 'dataKLD', 'simKLD', ...
     'MSE', 'geoSphere', 'EMD'});
 
 % Physical constants
-D = ones(1,3);
-D0 = 1;
+psD0 = 1;
 
 % Manifold/point set/potential properties
 U0 = [];
@@ -418,7 +451,7 @@ verbose = false;
 supportedOptions = {'InitialConditions', 'NumSimTimes', 'IsSaddle', ...
     'EnforceSaddles', 'ConstHeightSum', 'SimTimeHandling', ...
     'ConstFixedHeights', 'ConstScalarMetric', 'Verbose', ...
-    'OptimizationOptions', 'DiffusionCoefficient', ...
+    'OptimizationOptions', 'ConstDiffusionCoefficient', ...
     'PointDiffusionCoefficient', 'PointPotential', 'BasePotential', ...
     'Laplacian', 'MassMatrix', 'TikhonovRegularization', ...
     'RemoveOutliers', 'OutlierThreshold', 'OutlierNeighbors', ...
@@ -427,7 +460,9 @@ supportedOptions = {'InitialConditions', 'NumSimTimes', 'IsSaddle', ...
     'UseGPU', 'InitialGuess', 'EnforcePositiveMetric', ...
     'PrecomputeQuadProg', 'VolumeElementType', 'UpperBounds', ...
     'LowerBounds', 'ErrorType', 'DataSetWeights', ...
-    'EnforceUnitInterpParam', 'ConstInterpParam'};
+    'EnforceUnitInterpParam', 'ConstInterpParam', ...
+    'EnforcePositiveDiffusion', 'EnforceIdenticalDiffusion', ...
+    'EnforceIdenticalMetric'};
 checkSupportedOptions(supportedOptions, varargin);
 
 for i = 1:length(varargin)
@@ -496,10 +531,28 @@ for i = 1:length(varargin)
             'fitStaticInterpolatedLandscapes', 'enforceSaddles');
     end
 
+    if strcmpi(varargin{i}, 'EnforcePositiveDiffusion')
+        enforcePositiveDiffusion = varargin{i+1};
+        validateattributes(enforcePositiveDiffusion, {'logical'}, ...
+            {'scalar'}, mfilename, 'enforcePositiveDiffusion');
+    end
+
+    if strcmpi(varargin{i}, 'EnforceIdenticalDiffusion')
+        enforceIdenticalDiffusion = varargin{i+1};
+        validateattributes(enforceIdenticalDiffusion, {'logical'}, ...
+            {'scalar'}, mfilename, 'EnforceIdenticalDiffusion');
+    end
+
     if strcmpi(varargin{i}, 'EnforcePositiveMetric')
         enforcePositiveMetric = varargin{i+1};
         validateattributes(enforcePositiveMetric, {'logical'}, {'scalar'}, ...
             'fitStaticInterpolatedLandscapes', 'enforcePositiveMetric');
+    end
+
+    if strcmpi(varargin{i}, 'EnforceIdenticalMetric')
+        enforceIdenticalMetric = varargin{i+1};
+        validateattributes(enforceIdenticalMetric, {'logical'}, ...
+            {'scalar'}, mfilename, 'enforceIdenticalMetric');
     end
     
     if strcmpi(varargin{i}, 'EnforceUnitInterpParam')
@@ -549,14 +602,49 @@ for i = 1:length(varargin)
         end
     end
 
+    if strcmpi(varargin{i}, 'ConstDiffusionCoefficient')
+        constD = varargin{i+1};
+        if isempty(constD)
+            constD = [NaN NaN];
+        elseif isscalar(constD)
+            validateattributes(constD, {'numeric'}, ...
+                {'scalar', 'positive', 'finite', 'real'}, ...
+                mfilename, 'constD');
+            constD = constD * [1 1];
+        else
+            validateattributes(constD, {'numeric'}, ...
+                {'vector', 'numel', 2}, mfilename, 'constD');
+            if (size(constD, 1) ~= 1), constD = constD.'; end
+            assert(~any(isinf(constD)), ...
+                'Constant diffusion coefficient input contains inf');
+            assert(all(isreal(constD)), ...
+                'Constant diffusion coefficient input is complex');
+            assert(all(constD(~isnan(constD)) > 0), ...
+                'Constant diffusion coefficient input must be positive');
+        end
+    end
+
     if strcmpi(varargin{i}, 'ConstScalarMetric')
         constScalarMetric = varargin{i+1};
         if isempty(constScalarMetric)
             constScalarMetric = [NaN NaN];
-        else
+        elseif isscalar(constScalarMetric)
             validateattributes(constScalarMetric, {'numeric'}, ...
                 {'scalar', 'positive', 'finite', 'real'}, ...
-                'fitStaticInterpolatedLandscapes', 'constScalarMetric');
+                mfilename, 'constD');
+            constScalarMetric = constScalarMetric * [1 1];
+        else
+            validateattributes(constScalarMetric, {'numeric'}, ...
+                {'vector', 'numel', 2}, mfilename, 'constScalarMetric');
+            if (size(constScalarMetric, 1) ~= 1)
+                constScalarMetric = constScalarMetric.';
+            end
+            assert(~any(isinf(constScalarMetric)), ...
+                'Constant scalar metric input contains inf');
+            assert(all(isreal(constScalarMetric)), ...
+                'Constant scalar metric input is complex');
+            assert(all(constScalarMetric(~isnan(constScalarMetric)) > 0), ...
+                'Constant scalar metric input must be positive');
         end
     end
 
@@ -576,7 +664,7 @@ for i = 1:length(varargin)
         upperBounds = varargin{i+1};
         if ~isempty(upperBounds)
             validateattributes(upperBounds, {'numeric'}, {'vector', ...
-                'numel', 2*numFixPoints+3, 'nonnan'}, ...
+                'numel', 2*numFixPoints+5, 'nonnan'}, ...
                 'fitStaticInterpolatedLandscapes', 'upperBounds');
             if (size(upperBounds, 2) ~= 1)
                 upperBounds = upperBounds .';
@@ -588,7 +676,7 @@ for i = 1:length(varargin)
         lowerBounds = varargin{i+1};
         if ~isempty(lowerBounds)
             validateattributes(lowerBounds, {'numeric'}, {'vector', ...
-                'numel', 2*numFixPoints+3, 'nonnan'}, ...
+                'numel', 2*numFixPoints+5, 'nonnan'}, ...
                 'fitStaticInterpolatedLandscapes', 'lowerBounds');
             if (size(lowerBounds, 2) ~= 1)
                 lowerBounds = lowerBounds .';
@@ -625,19 +713,11 @@ for i = 1:length(varargin)
     
     % Physical Constants --------------------------------------------------
     
-    if strcmpi(varargin{i}, 'DiffusionCoefficient')
-        D = varargin{i+1};
-        if isscalar(D), D = D * ones(1,3); end
-        validateattributes(D, {'numeric'}, ...
-            {'vector', 'positive', 'finite', 'real', 'numel', 3}, ...
-            'fitStaticInterpolatedLandscapes', 'D');
-    end
-    
     if strcmpi(varargin{i}, 'PointDiffusionCoefficient')
-        D0 = varargin{i+1};
-        validateattributes(D0, {'numeric'}, ...
+        psD0 = varargin{i+1};
+        validateattributes(psD0, {'numeric'}, ...
             {'scalar', 'positive', 'finite', 'real'}, ...
-            'fitStaticInterpolatedLandscapes', 'D0');
+            'fitStaticInterpolatedLandscapes', 'psD0');
     end
 
     % Manifold/Point Set/Potential Properties -----------------------------
@@ -768,6 +848,11 @@ end
 
 if useGPU, try gpuDevice; catch, useGPU = false; end; end
 
+assert(~enforceIdenticalDiffusion, ['The identical diffusion ' ...
+    'coefficient constraint has not yet been implemented!']);
+assert(~enforceIdenticalMetric, ['The identical metric ' ...
+    'constraint has not yet been implemented!']);
+
 %--------------------------------------------------------------------------
 % OPTIMIZATION INPUT PROCESSING
 %--------------------------------------------------------------------------
@@ -777,25 +862,56 @@ numConstHeights = sum(~isnan(constFixHeights(:)));
 
 if strcmpi(simTimeHandling, 'constant')
     error('Constant time handling is not yet implemented');
-    assert(strcmpi(errorType, 'symKLD'), ['Constant simulation time ' ...
-        'handling is currently only capable of handling the ' ...
-        'symmetric KL divergence error']);
+    % assert(strcmpi(errorType, 'symKLD'), ['Constant simulation time ' ...
+    %     'handling is currently only capable of handling the ' ...
+    %     'symmetric KL divergence error']);
 end
 
 % Process the supplied initial guess --------------------------------------
 if ~isempty(initGuess)
 
-    assert(numel(initGuess) == (2*numFixPoints+3), ...
+    assert(numel(initGuess) == (2*numFixPoints+5), ...
         'Initial guess is improperly sized');
 
-    if ~isnan(constScalarMetric(1))
-        initGuess(numFixPoints+1) = constScalarMetric(1);
+    if enforceIdenticalDiffusion
+        if (sum(isnan(constD)) == 1)
+            constD(isnan(constD)) = constD(~isnan(constD));
+        elseif (sum(isnan(constD)) == 0)
+            assert(consD(1) == constD(2), ['Non-identical constant ' ...
+                'diffusion input supplied with identical diffusion ' ...
+                'enforced']);
+        end
     end
-    if ~isnan(constScalarMetric(2))
-        initGuess(end-1) = constScalarMetric(2);
+
+    if ~isnan(constD(1))
+        initGuess(numFixPoints+1) = constD(1);
+    end
+    if ~isnan(constD(2))
+        initGuess(2*numFixPoints+3) = constD(2);
     end
     assert((initGuess(numFixPoints+1) > 0) && ...
-        (initGuess(end-1) > 0), ['Scalar metrics ' ...
+        (initGuess(2*numFixPoints+3) > 0), ['Diffusion ' ...
+        'coefficients must be positive in the initial guess']);
+
+    if enforceIdenticalMetric
+        if (sum(isnan(constScalarMetric)) == 1)
+            constScalarMetric(isnan(constScalarMetric)) = ...
+                constScalarMetric(~isnan(constScalarMetric));
+        elseif (sum(isnan(constScalarMetric)) == 0)
+            assert(constScalarMetric(1) == constScalarMetric(2), ...
+                ['Non-identical constant metric input supplied with ' ...
+                'identical metric enforced']);
+        end
+    end
+
+    if ~isnan(constScalarMetric(1))
+        initGuess(numFixPoints+2) = constScalarMetric(1);
+    end
+    if ~isnan(constScalarMetric(2))
+        initGuess(2*numFixPoints+4) = constScalarMetric(2);
+    end
+    assert((initGuess(numFixPoints+2) > 0) && ...
+        (initGuess(2*numFixPoints+4) > 0), ['Scalar metrics ' ...
         'must be positive in the initial guess']);
 
     if any(~isnan(constFixHeights(:,1)))
@@ -803,7 +919,7 @@ if ~isempty(initGuess)
             constFixHeights(~isnan(constFixHeights(:,1)), 1);
     end
     if any(~isnan(constFixHeights(:,2)))
-        initGuess(find(~isnan(constFixHeights(:,2)))+numFixPoints+1) = ...
+        initGuess(find(~isnan(constFixHeights(:,2)))+numFixPoints+2) = ...
             constFixHeights(~isnan(constFixHeights(:,2)), 2);
     end
 
@@ -815,7 +931,7 @@ if ~isempty(initGuess)
     end
     
     if ~isnan(constHeightSum(2))
-        assert(abs(sum(initGuess((numFixPoints+1)+(1:numFixPoints))) - ...
+        assert(abs(sum(initGuess((numFixPoints+2)+(1:numFixPoints))) - ...
             constHeightSum(2)) < 1e-12, ...
             ['User supplied initial guess for landscape 1 does not ' ...
             'adhere to the fixed point height sum constraint']);
@@ -895,6 +1011,10 @@ for expID = 1:3
             end
             
         else
+
+            assert(~any(dataTimes{expID}{i} == 0), ['Supplied initial ' ...
+                'conditions for landscape %d data set %d conflict ' ...
+                'with data times'], expID, i);
             
             validateattributes(initConditions{expID}{i}, {'numeric'}, ...
                 {'vector', 'nonnegative', 'finite', 'real'});
@@ -912,7 +1032,7 @@ for expID = 1:3
                 curIC = sum(curIC.^2, 2);
                 curIC = exp(-curIC ./ (2 * initConditions{expID}{i}(2)^2));
                 curIC  = curIC ./ (2 * pi * initConditions{expID}{i}(2)^2)^(dim/2);
-                curIC = exp(U0/D0) .* curIC ./ numPoints;
+                curIC = exp(U0/psD0) .* curIC ./ numPoints;
                 curIC = curIC ./ sum(curIC(:));
                 initConditions{expID}{i} = curIC(:);
                 
@@ -971,10 +1091,10 @@ dataSetWeights = [dataSetWeights{:}];
 dataSetWeights = dataSetWeights ./ sum(dataSetWeights);
 dataSetWeights = mat2cell(dataSetWeights, 1, numTotalDataPoints).';
 assert(isequal(size(dataSetWeights), [3 1]), ...
-    'Data set weight normalization failed');
+    'Data set weight normalization failed (cell array size)');
 for i = 1:numel(dataSetWeights)
     assert(numel(dataSetWeights{i}) == numTotalDataPoints(i), ...
-        'Data set weight normalizatin failed');
+        'Data set weight normalization failed');
 end
 
 %--------------------------------------------------------------------------
@@ -984,7 +1104,7 @@ end
 % Estimate point set pseudo potential from point cloud---------------------
 if isempty(U0)
     if verbose, disp('Computing point set potential:'); end
-    U0 = -D0 * log(gaussianKDE(X, X, [], sqrt(2 * dt), verbose));
+    U0 = -psD0 * log(gaussianKDE(X, X, [], sqrt(2 * dt), verbose));
 end
 
 if isempty(UB), UB = U0; end
@@ -997,7 +1117,7 @@ end
 
 if strcmpi(volumeType, 'GraphLaplacian')
 
-    volumeElement = exp(U0 ./ D0);
+    volumeElement = exp(U0 ./ psD0) ./ numPoints;
 
 elseif strcmpi(volumeType, 'LaplaceBeltrami')
 
@@ -1089,13 +1209,14 @@ end
 %==========================================================================
 % BUILD OPTIMIZATION PROBLEM
 %==========================================================================
-% The saddle inequality constraint, the positive metric constraints, the
-% unit interval interpolation parameter constraints, and the total height
-% sum constraint are the only non-trivial constraints. If any of these are
-% supplied, we formulate the full constrained problem and run a
-% corresponding constrained minimization. If none of these constraints
-% are enforced, we enforce any remaining constraints by construction and
-% run an unconstrained minimization
+% The saddle inequality constraint, the positive diffusion constant
+% constraints, the identical diffusion constant constraint, the positive
+% metric constraints, the unit interval interpolation parameter
+% constraints, and the total height sum constraint are the only non-trivial
+% constraints. If any of these are supplied, we formulate the full
+% constrained problem and run a corresponding constrained minimization. If
+% none of these constraints are enforced, we enforce any remaining
+% constraints by construction and run an unconstrained minimization
 
 % Build inequality constraints --------------------------------------------
 
@@ -1116,9 +1237,9 @@ if enforceSaddles
     A = full(sparse( ...
         [repmat((1:size(A,1)).', [1 2]); ...
         repmat((1:size(A,1)).', [1 2])+size(A,1)], ...
-        [A; A+(numFixPoints+1)], ...
+        [A; A+(numFixPoints+2)], ...
         repmat([ones(size(A,1), 1), -ones(size(A,1), 1)], [2 1]), ...
-        2*size(A,1), 2*numFixPoints+3 ));
+        2*size(A,1), 2*numFixPoints+5 ));
     
     b = -1e-12 * ones(size(A,1), 1);
 
@@ -1133,12 +1254,12 @@ if any(~isnan(constHeightSum))
     if verbose, disp('Adding height sum constraint'); end
 
     if ~isnan(constHeightSum(1))
-        Aeq = [Aeq; ones(1, numFixPoints) zeros(1, numFixPoints+3)];
+        Aeq = [Aeq; ones(1, numFixPoints) zeros(1, numFixPoints+5)];
         beq = [beq; constHeightSum(1)];
     end
     
     if ~isnan(constHeightSum(2))
-        Aeq = [Aeq; zeros(1, numFixPoints+1), ones(1, numFixPoints), 0 0];
+        Aeq = [Aeq; zeros(1, numFixPoints+2), ones(1, numFixPoints), 0 0 0];
         beq = [beq; constHeightSum(2)];
     end
 
@@ -1153,7 +1274,7 @@ if (numConstHeights > 0)
         Aeq = [Aeq; ...
             full(sparse(1:sum(~isnan(constFixHeights(:,1))), ...
             find(~isnan(constFixHeights(:,1))), ...
-            1, sum(~isnan(constFixHeights(:,1))), 2*numFixPoints+3))];
+            1, sum(~isnan(constFixHeights(:,1))), 2*numFixPoints+5))];
         
         beq = [beq; reshape( ...
             constFixHeights(~isnan(constFixHeights(:,1)), 1), [], 1)];
@@ -1164,8 +1285,8 @@ if (numConstHeights > 0)
         
         Aeq = [Aeq; ...
             full(sparse(1:sum(~isnan(constFixHeights(:,2))), ...
-            find(~isnan(constFixHeights(:,2)))+(numFixPoints+1), ...
-            1, sum(~isnan(constFixHeights(:,2))), 2*numFixPoints+3))];
+            find(~isnan(constFixHeights(:,2)))+(numFixPoints+2), ...
+            1, sum(~isnan(constFixHeights(:,2))), 2*numFixPoints+5))];
         
         beq = [beq; reshape( ...
             constFixHeights(~isnan(constFixHeights(:,2)), 2), [], 1)];
@@ -1174,20 +1295,47 @@ if (numConstHeights > 0)
 
 end
 
+if any(~isnan(constD))
+
+    if verbose, disp('Adding fixed diffusion coefficient constraint'); end
+
+    % There is no need to enforce a positive/identical diffusion
+    % coefficient if they are both already fixed
+    if (sum(isnan(constD)) == 0)
+        enforcePositiveDiffusion = false;
+        enforceIdenticalDiffusion = false;
+    end
+
+    if ~isnan(constD(1))
+        Aeq = [Aeq; full(sparse(1, numFixPoints+1, 1, 1, 2*numFixPoints+5))];
+        beq = [beq; constD(1)];
+    end
+
+    if ~isnan(constD(2))
+        Aeq = [Aeq; full(sparse(1, 2*numFixPoints+3, 1, 1, 2*numFixPoints+5))];
+        beq = [beq; constD(2)];
+    end
+
+end
+
 if any(~isnan(constScalarMetric))
 
     if verbose, disp('Adding fixed scalar metric constraint'); end
 
-    % There is no need to enforce a positive metric if it is already fixed
-    enforcePositiveMetric = false;
+    % There is no need to enforce a positive/identical metric if they are
+    % both already fixed
+    if (sum(isnan(constScalarMetric)) == 0)
+        enforcePositiveMetric = false;
+        enforceIdenticalMetric = false;
+    end
 
     if ~isnan(constScalarMetric(1))
-        Aeq = [Aeq; full(sparse(1, numFixPoints+1, 1, 1, 2*numFixPoints+3))];
+        Aeq = [Aeq; full(sparse(1, numFixPoints+2, 1, 1, 2*numFixPoints+5))];
         beq = [beq; constScalarMetric(1)];
     end
     
     if ~isnan(constScalarMetric(2))
-        Aeq = [Aeq; full(sparse(1, 2*numFixPoints+2, 1, 1, 2*numFixPoints+3))];
+        Aeq = [Aeq; full(sparse(1, 2*numFixPoints+4, 1, 1, 2*numFixPoints+5))];
         beq = [beq; constScalarMetric(2)];
     end
 
@@ -1203,7 +1351,7 @@ if ~isnan(constInterpParam)
     % [0, 1] if it is already fixed
     enforceUnitInterpParam = false;
     
-    Aeq = [Aeq; full(sparse(1, 2*numFixPoints+3, 1, 1, 2*numFixPoints+3))];
+    Aeq = [Aeq; full(sparse(1, 2*numFixPoints+5, 1, 1, 2*numFixPoints+5))];
     beq = [beq; constInterpParam];
     
 end
@@ -1212,28 +1360,41 @@ end
 
 if isempty(lowerBounds)
 
+    lb = -inf(2*numFixPoints+5, 1);
+
+    if enforcePositiveDiffusion
+        if verbose, disp('Enforcing positive diffusion'); end
+        lb(numFixPoints+1) = 1e-12;
+        lb(2*numFixPoints+3) = 1e-12;
+    end
+
     if enforcePositiveMetric
         if verbose, disp('Enforcing positive metric'); end
-        lb = [-inf(numFixPoints, 1); 1e-12; -inf(numFixPoints, 1); 1e-12];
-    else
-        lb = -inf(2*numFixPoints+2, 1);
+        lb(numFixPoints+2) = 1e-12;
+        lb(2*numFixPoints+4) = 1e-12;
     end
     
     if enforceUnitInterpParam
         if verbose, disp('Enforcing unit interval interpolation'); end
-        lb = [lb; 0];
-    else
-        lb = [lb; -inf];
+        lb(end) = 0;
     end
     
 else
 
     lb = lowerBounds;
-    if enforcePositiveMetric
-        assert((lb(numFixPoints+1) > 0) && (lb(end-1) > 0), ...
-	    ['Lower bound constraint inconsistent ' ...
-            'with positive metric']);
+
+    if enforcePositiveDiffusion
+        assert((lb(numFixPoints+1) > 0) && (lb(2*numFixPoints+3) > 0), ...
+            ['Lower bound inconsistent with positive ' ...
+            'diffusion constraint']);
     end
+
+    if enforcePositiveMetric
+        assert((lb(numFixPoints+2) > 0) && (lb(2*numFixPoints+4) > 0), ...
+	    ['Lower bound constraint inconsistent ' ...
+            'with positive metric constraint']);
+    end
+
     if enforceUnitInterpParam
         assert(lb(end) >= 0, ...
 	    ['Lower bound constraint inconsistent ' ...
@@ -1244,12 +1405,8 @@ end
 
 if isempty(upperBounds)
     
-    ub = inf(2*numFixPoints+2, 1);
-    if enforceUnitInterpParam
-        ub = [ub; 1];
-    else
-        ub = [ub; inf];
-    end
+    ub = inf(2*numFixPoints+5, 1);
+    if enforceUnitInterpParam, ub(end) = 1; end
 
 else
 
@@ -1263,20 +1420,29 @@ else
 end
 
 % Determine if unconstrained minimization is feasible ---------------------
+% The 'enforceIdenticalDiffusion' and 'enforceIdenticalMetric' constraints
+% can only persist to this point if no 'constD' or 'constScalarMetric' were
+% supplied, respectively, which means that values for both landscapes are
+% unconstrained.
 
-constrainedValues = nan(2*numFixPoints+3, 1);
+constrainedValues = nan(2*numFixPoints+5, 1);
 runConstrainedMinimization = true;
-if ~enforceSaddles && ~enforcePositiveMetric ...
-        && ~enforceUnitInterpParam && isempty(constHeightSum)
+if ( ~enforceSaddles && ~enforcePositiveDiffusion ...
+        && ~enforceIdenticalDiffusion && ~enforcePositiveMetric ...
+        && ~enforceIdenticalMetric && ~enforceUnitInterpParam ...
+        && isempty(constHeightSum) && all(isinf(lb)) && all(isinf(ub)) )
 
     runConstrainedMinimization = false;
     
     constrainedValues(1:numFixPoints) = constFixHeights(:,1);
-    constrainedValues((numFixPoints+1)+(1:numFixPoints)) = ...
+    constrainedValues((numFixPoints+2)+(1:numFixPoints)) = ...
         constFixHeights(:,2);
+
+    constrainedValues(numFixPoints+1) = constD(1);
+    constrainedValues(2*numFixPoints+3) = constD(2);
     
-    constrainedValues(numFixPoints+1) = constScalarMetric(1);
-    constrainedValues(2*numFixPoints+2) = constScalarMetric(2);
+    constrainedValues(numFixPoints+2) = constScalarMetric(1);
+    constrainedValues(2*numFixPoints+4) = constScalarMetric(2);
     
     constrainedValues(end) = constInterpParam;
 
@@ -1291,6 +1457,7 @@ clear upperBounds lowerBounds
 %==========================================================================
 % RUN OPTIMIZATION
 %==========================================================================
+
 if strcmpi(simTimeHandling, 'constant')
     optFun = @simulateLandscapeDynamicsConstTimeScale;
 else
@@ -1335,12 +1502,14 @@ optConstrainedValues = constrainedValues;
 optConstrainedValues(isnan(constrainedValues)) = optVals;
 
 optFixHeights0 = optConstrainedValues(1:numFixPoints);
-optScalarMetric0 = optConstrainedValues(numFixPoints+1);
+optD0 = optConstrainedValues(numFixPoints+1);
+optScalarMetric0 = optConstrainedValues(numFixPoints+2);
 
-optFixHeights1 = optConstrainedValues(1+numFixPoints+(1:numFixPoints));
-optScalarMetric1 = optConstrainedValues(2*numFixPoints+2);
+optFixHeights1 = optConstrainedValues(2+numFixPoints+(1:numFixPoints));
+optD1 = optConstrainedValues(2*numFixPoints+3);
+optScalarMetric1 = optConstrainedValues(2*numFixPoints+4);
 
-optInterpParam = optConstrainedValues(2*numFixPoints+3);
+optInterpParam = optConstrainedValues(2*numFixPoints+5);
 
 optTimes = cell(3, 1);
 optTimeScales = [NaN NaN NaN];
@@ -1380,7 +1549,7 @@ optUD0 = UB + optUI0; % Combine to compute dynamical potential
 % This is a large dense matrix - we don't keep multiple copies
 optT = computeTransitionMatrix(X, optUD0, dt, ...
     'PointPotential', U0, 'ScalarMetric', optScalarMetric0, ...
-    'DiffusionCoefficient', D(1), 'PointDiffusionCoefficient', D0, ...
+    'DiffusionCoefficient', optD0, 'PointDiffusionCoefficient', psD0, ...
     'ClipThreshold', clipThreshold, ...
     'StrictNormalization', strictNormalization, ...
     'VolumeElementType', volumeType, 'VolumeElement', volumeElement);
@@ -1473,7 +1642,7 @@ optUD1 = UB + optUI1; % Combine to compute dynamical potential
 % This is a large dense matrix - we don't keep multiple copies
 optT = computeTransitionMatrix(X, optUD1, dt, ...
     'PointPotential', U0, 'ScalarMetric', optScalarMetric1, ...
-    'DiffusionCoefficient', D(3), 'PointDiffusionCoefficient', D0, ...
+    'DiffusionCoefficient', optD1, 'PointDiffusionCoefficient', psD0, ...
     'ClipThreshold', clipThreshold, ...
     'StrictNormalization', strictNormalization, ...
     'VolumeElementType', volumeType, 'VolumeElement', volumeElement);
@@ -1540,10 +1709,12 @@ end
 optIntUD = (1-optInterpParam) .* (optUD0 ./ optScalarMetric0) + ...
     optInterpParam .* (optUD1 ./ optScalarMetric1);
 
+optIntD = (1-optInterpParam) .* optD0 + optInterpParam .* optD1;
+
 % This is a large dense matrix - we don't keep multiple copies
 optT = computeTransitionMatrix(X, optIntUD, dt, ...
     'PointPotential', U0, 'ScalarMetric', 1, ...
-    'DiffusionCoefficient', D(2), 'PointDiffusionCoefficient', D0, ...
+    'DiffusionCoefficient', optIntD, 'PointDiffusionCoefficient', psD0, ...
     'ClipThreshold', clipThreshold, ...
     'StrictNormalization', strictNormalization, ...
     'VolumeElementType', volumeType, 'VolumeElement', volumeElement);
@@ -1617,11 +1788,13 @@ if verbose, fprintf('Done\n'); end
         locConstrainedValues(isnan(constrainedValues)) = x;
 
         fixHeights0 = locConstrainedValues(1:numFixPoints);
-        scalarMetric0 = locConstrainedValues(numFixPoints+1);
+        D0 = locConstrainedValues(numFixPoints+1);
+        scalarMetric0 = locConstrainedValues(numFixPoints+2);
         
         fixHeights1 = ...
-            locConstrainedValues((numFixPoints+1)+(1:numFixPoints));
-        scalarMetric1 = locConstrainedValues(2*numFixPoints+2);
+            locConstrainedValues((numFixPoints+2)+(1:numFixPoints));
+        D1 = locConstrainedValues(2*numFixPoints+3);
+        scalarMetric1 = locConstrainedValues(2*numFixPoints+4);
         
         interpParam = locConstrainedValues(end);
         
@@ -1659,8 +1832,8 @@ if verbose, fprintf('Done\n'); end
         % This is a large dense matrix - we don't keep multiple copies
         T = computeTransitionMatrix(X, UD0, dt, ...
             'PointPotential', U0, 'ScalarMetric', scalarMetric0, ...
-            'DiffusionCoefficient', D(1), ...
-            'PointDiffusionCoefficient', D0, ...
+            'DiffusionCoefficient', D0, ...
+            'PointDiffusionCoefficient', psD0, ...
             'ClipThreshold', clipThreshold, ...
             'StrictNormalization', strictNormalization, ...
             'VolumeElementType', volumeType, ...
@@ -1739,8 +1912,8 @@ if verbose, fprintf('Done\n'); end
         % This is a large dense matrix - we don't keep multiple copies
         T = computeTransitionMatrix(X, UD1, dt, ...
             'PointPotential', U0, 'ScalarMetric', scalarMetric1, ...
-            'DiffusionCoefficient', D(3), ...
-            'PointDiffusionCoefficient', D0, ...
+            'DiffusionCoefficient', D1, ...
+            'PointDiffusionCoefficient', psD0, ...
             'ClipThreshold', clipThreshold, ...
             'StrictNormalization', strictNormalization, ...
             'VolumeElementType', volumeType, ...
@@ -1793,12 +1966,14 @@ if verbose, fprintf('Done\n'); end
         
         intUD = (1-interpParam) .* (UD0 ./ scalarMetric0) + ...
             interpParam .* (UD1 ./ scalarMetric1);
+
+        intD = (1-interpParam) .* D0 + interpParam .* D1;
         
         % This is a large dense matrix - we don't keep multiple copies
         T = computeTransitionMatrix(X, intUD, dt, ...
             'PointPotential', U0, 'ScalarMetric', 1, ...
-            'DiffusionCoefficient', D(2), ...
-            'PointDiffusionCoefficient', D0, ...
+            'DiffusionCoefficient', intD, ...
+            'PointDiffusionCoefficient', psD0, ...
             'ClipThreshold', clipThreshold, ...
             'StrictNormalization', strictNormalization, ...
             'VolumeElementType', volumeType, ...
@@ -1888,7 +2063,7 @@ if verbose, fprintf('Done\n'); end
 
         T = computeTransitionMatrix(X, U, dt, ...
             'PointPotential', U0, 'ScalarMetric', scalarMetric, ...
-            'DiffusionCoefficient', D, 'PointDiffusionCoefficient', D0, ...
+            'DiffusionCoefficient', D, 'PointDiffusionCoefficient', psD0, ...
             'ClipThreshold', clipThreshold, ...
             'StrictNormalization', strictNormalization, ...
             'VolumeElementType', volumeType, ...
