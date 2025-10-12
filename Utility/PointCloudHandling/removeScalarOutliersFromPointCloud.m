@@ -1,8 +1,8 @@
 function U = removeScalarOutliersFromPointCloud( ...
     X, Uin, outlierThreshold, outlierNNSize)
-%REMOVESCALAROUTLIERSFROMPOINTCLOUD Given an D-dimensional point cloud with
+%REMOVESCALAROUTLIERSFROMPOINTCLOUD Given a D-dimensional point cloud with
 %a scalar field defined on each point, this function removes outliers
-%(defined by a user specified global threshold) by setting the invalid date
+%(defined by a user specified global threshold) by setting the invalid data
 %points equal to the average of its valid nearest neighborhood
 %
 %   INPUT PARAMETERS:
