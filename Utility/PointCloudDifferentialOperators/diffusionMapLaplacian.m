@@ -1,4 +1,4 @@
-function [L, M, sigma] = diffusionMapLaplacian(X, sigma, kNN)
+function [L, M, sigma] = diffusionMapLaplacian(X, sigma, kNN, normalizeDensity)
 %DIFFUSIONMAPLAPLACIAN Construct a point cloud Laplace-Beltrami operator
 %based on a diffusion map algorithm. For any manifold with a boundary, the
 %Laplace-Beltrami operator needs to be interpreted as acting with Neumann
@@ -16,7 +16,11 @@ function [L, M, sigma] = diffusionMapLaplacian(X, sigma, kNN)
 %       - sigma:                Bandwidth of the affinity matrix kernel
 %
 %       - kNN:                  The number of nearest neighbors retained in
-%                               the affinity matrix computation                     
+%                               the affinity matrix computation
+%
+%       - normalizeDensity:     Whether to normalize density in the
+%                               diffusion map computation (true)
+%
 %   OUTPUT PARAMETERS:
 %
 %       - L:        #N x #N Laplace-Beltrami operator. L is a symmetric,
@@ -34,6 +38,7 @@ function [L, M, sigma] = diffusionMapLaplacian(X, sigma, kNN)
 % INPUT PROCESSING
 %--------------------------------------------------------------------------
 % NOTE: More input checks are performed in the diffusion map functions
+if (nargin < 4), normalizeDensity = true; end
 
 validateattributes(X, {'numeric'}, {'2d', 'finite', 'real'});
 numPoints = size(X,1); % dims = size(X,2);
@@ -64,6 +69,7 @@ mapOptions = struct();
 mapOptions.Normalization = 'LaplaceBeltrami';
 mapOptions.NumVectors = 0;
 mapOptions.Verbose = false;
+mapOptions.normalizeDensity = normalizeDensity;
 
 [~, ~, ~, KAlpha, DAlpha] = diffusionMap(K, mapOptions);
 

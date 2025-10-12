@@ -3,11 +3,11 @@
 % well studied cotangent Laplacian on a spherical mesh
 clear; close all; clc;
 
-numPoints = 8000;
-X = randsphere(numPoints);
+% numPoints = 8000;
+% X = randsphere(numPoints);
 
-% [X, F] = subdivided_sphere(4);
-% numPoints = size(X,1);
+[X, F] = subdivided_sphere(4);
+numPoints = size(X,1);
 
 % Compute a spherical harmonic on the point cloud
 l = randi(4)+1;
@@ -69,21 +69,3 @@ axis equal
 colorbar
 set(gca, 'Clim', [0 0.5]);
 title('Relative Error');
-
-%%
-close all; clc;
-
-invM = spdiags(1./diag(M), 0, size(M,1), size(M,2));
-[V1, D1] = eig(full(invM * (-L)), 'vector');
-[~, sortIDx] = sort(abs(D1), 'ascend');
-D1 = D1(sortIDx);
-V1 = V1(:, sortIDx);
-
-[V2, D2] = eig(full(-L), full(M), 'vector');
-[~, sortIDx] = sort(abs(D2), 'ascend');
-D2 = D2(sortIDx);
-V2 = V2(:, sortIDx);
-%%
-[V3, D3] = eigs(-L, M, 500, 'smallestabs', 'Tolerance', 1e-16, ...
-    'MaxIterations', 500, 'SubspaceDimension', 2000);
-D3 = diag(D3);

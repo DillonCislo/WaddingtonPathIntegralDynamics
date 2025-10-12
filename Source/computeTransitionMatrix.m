@@ -66,6 +66,13 @@ function [T, volumeElement] = computeTransitionMatrix(X, U, dt, varargin)
 %       computations when this function is called as a subroutine of a
 %       larger method.
 %
+%       - ('VectorField', vecField = []): #N x dim vector field defined on
+%       each point. This is an experimental feature that lets the user
+%       build a transition matrix associated to the following theoretical
+%       full vector field: -g^{-1) \nabla U + vecField. This allows for the
+%       exploration of more general, non-gradient vector fields using this
+%       method (e.g. periodic orbits).
+%
 %   OUTPUT PARAMETERS:
 %
 %       - T:                #N x #N (left Markov) transition matrix
@@ -80,7 +87,7 @@ function [T, volumeElement] = computeTransitionMatrix(X, U, dt, varargin)
 if ~isempty(X)
     validateattributes(X, {'numeric'}, {'2d', 'finite', 'real'}, ...
         'computeTransitionMatrix', 'X');
-    numPoints = size(X,1); % dim = size(X,2);
+    numPoints = size(X,1); dim = size(X,2);
 else
     numPoints = -1;
 end
@@ -111,13 +118,15 @@ precompT = [];
 useGPU = true;
 volumeType = 'graphlaplacian';
 volumeElement = [];
+vecField = [];
 
 allVolumeTypes = {'graphlaplacian', 'laplacebeltrami'};
 
 supportedOptions = {'PointPotential', 'ScalarMetric', ...
     'DiffusionCoefficient', 'PointDiffusionCoefficient', ...
     'ClipThreshold', 'StrictNormalization', 'DistanceMatrix', ...
-    'UseGPU', 'VolumeElementType', 'VolumeElement', 'PrecomputeBaseT'};
+    'UseGPU', 'VolumeElementType', 'VolumeElement', 'PrecomputeBaseT', ...
+    'VectorField'};
 checkSupportedOptions(supportedOptions, varargin);
 
 for i = 1:length(varargin)
@@ -210,6 +219,15 @@ for i = 1:length(varargin)
                 'computeTransitionMatrix', 'precompT')
         end
     end
+
+    if strcmpi(varargin{i}, 'VectorField')
+        vecField = varargin{i+1};
+        if ~isempty(vecField)
+            validateattributes(vecField, {'numeric'}, {'2d', ...
+                'nrows', numPoints, 'ncols', dim, 'finite', 'real'}, ...
+                'computeTransitionMatrix', 'vecField');
+        end
+    end
     
 end
 
@@ -257,6 +275,7 @@ if useGPU
     scalarMetric = gpuArray(scalarMetric);
     
     if ~isempty(precompT), precompT = gpuArray(precompT); end
+    if ~isempty(vecField), vecField = gpuArray(vecField); end
     if ~isempty(distMatrix), distMatrix = gpuArray(distMatrix); end
     if ~isempty(volumeElement), volumeElement = gpuArray(volumeElement);end
 
@@ -294,6 +313,17 @@ else
     U = U ./ D;
     T = T + ((U.' - U) ./ (scalarMetric.' + scalarMetric));
     
+end
+
+% Add external forcing vector field terms to operator
+if ~isempty(vecField)
+
+    XDiffArr = repmat(permute(X, [1 3 2]), [1 numPoints 1]) - ...
+        repmat(permute(X, [3 1 2]), [numPoints 1 1]);
+    vecField = repmat(permute(vecField, [3 1 2]), [numPoints 1 1]);
+
+    T = T + squeeze(dot(XDiffArr, vecField, 3)) ./ (2 * D);
+
 end
 
 T = exp(T);
