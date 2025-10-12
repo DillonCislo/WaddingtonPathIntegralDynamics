@@ -51,7 +51,3 @@ fitting, transition matrix estimation, and probability-density evolution using t
   required for selected features and visualizations.
 - `compile_mex.m` and friends: Convenience scripts for building the bundled MEX extensions,
   including the `Utility/ProximityGraphs/NGL` bindings backed by `External/ngl-beta`.
-
-## License
-
-This project is distributed under the terms of the MIT License. See `LICENSE` for the full text.
