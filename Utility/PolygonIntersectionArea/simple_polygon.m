@@ -1,4 +1,24 @@
 function [x, y, dt] = simple_polygon(numSides)
+%SIMPLE_POLYGON Generate a random simple polygon with a prescribed number
+%of sides using repeated Delaunay refinements.
+%
+%   INPUT PARAMETERS:
+%
+%       - numSides:     Desired polygon edge count. Values < 3 return an
+%                       empty polygon and a default triangulation object.
+%
+%   OUTPUT PARAMETERS:
+%
+%       - x:            (#numSides+1) x 1 vector of polygon vertex x-coords
+%                       returned in counter-clockwise order. The final
+%                       entry repeats the first vertex for convenience.
+%
+%       - y:            Matching y-coordinates for the generated polygon.
+%
+%       - dt:           Delaunay triangulation object used to build the
+%                       polygon boundary.
+%
+%   by Dillon Cislo (documentation refreshed 2025/10/12)
 
     if numSides < 3
         x = [];
