@@ -18,11 +18,12 @@
 %
 %==========================================================================
 
-addpath(genpath('/mnt/data0/Code/MATLAB/WaddingtonPathIntegralDynamics'));
-rmpath(genpath('/mnt/data0/Code/MATLAB/WaddingtonPathIntegralDynamics/External/gptoolbox'))
-addpath(genpath('/mnt/data0/Code/MATLAB/gptoolbox'))
-addpath(genpath('/mnt/data0/Code/MATLAB/shadedErrorBar'))
-addpath('/mnt/data0/users/djcislo/WaddingtonDynamicsPaperCode/GeneralScriptsAndFunctions');
+[scriptDir, ~, ~] = fileparts(matlab.desktop.editor.getActiveFilename);
+cd(scriptDir);
+
+addpath(genpath(fullfile(scriptDir, '../../WaddingtonPathIntegralDynamics')));
+
+clear scriptDir
 
 %% ************************************************************************
 % *************************************************************************
@@ -191,10 +192,6 @@ sodeSettings.numSimTimes = 5e4;
 % synthetic data
 sodeSettings.sampleTimes = linspace(0, ...
     sodeSettings.dtSODE * sodeSettings.numSimTimes, numExpTimes);
-% sodeSettings.sampleTimes = linspace(0, ...
-%     (sodeSettings.dtSODE * sodeSettings.numSimTimes).^(1/2), numExpTimes);
-% sodeSettings.sampleTimes = round((sodeSettings.sampleTimes).^2 ./ 0.02) / 20;
-% sodeSettings.sampleTimes = [0 0.3 1.2 2.4 5];
 sodeSettings.sampleTimes = [0 0.2 0.8 1.6 5];
 
 % The number of points sampled at each sampling time for each experimental
@@ -254,7 +251,7 @@ for i = 1:numExpCond
             sqrt(2 * sodeSettings.dtSODE * sodeSettings.DSODE) .* ...
             normrnd(0, 1, [size(X,1) 2]);
 
-        if any(abs(t-sodeSettings.sampleTimes) < 1e-12) % ismember(t, sodeSettings.sampleTimes)
+        if any(abs(t-sodeSettings.sampleTimes) < 1e-12)
 
             % Extract the synthetic data for the current time point
             allX{i,j} = X(1:numPointsPerSample, :);
@@ -386,9 +383,7 @@ samplingOptions.samplingMethod = 'SPARTAN';
 samplingOptions.omtIter = 1000;
 samplingOptions.verbose = false;
 
-% We will subsample points so that all days are equally represented
-% samplingOptions.numSamplesPerDay = [200 450 450 450 450];
-% samplingOptions.numSamplesPerDay = [200 300 350 350 800];
+% Set the number of points to retain from each day during subsampling
 samplingOptions.numSamplesPerDay = [200 300 300 300 900];
 
 rng(42, 'twister'); % For reproducible random numbers
@@ -460,13 +455,12 @@ clc;
 
 % This will be the "dynamical" time step parameter which we will hold
 % fixed for the rest of the script
-dt = 0.4e-2;
+dt = 2e-2;
 
 recalculatePseudopotential = true;
 if ~exist('U0DE', 'var') || recalculatePseudopotential
 
     fprintf('Estimating pseudopotential on subsampled point cloud... ');
-    % U0DE = -log(gaussianKDE(XDE, XDE, [], sqrt(2*dt), false));
     U0DE = -log(gaussianKDE(XDE, XDE, [], sqrt(2 * dt), false, [], [], true, true));
     fprintf('Done\n');
 
@@ -689,14 +683,17 @@ end
 clear i cb pathVisIDx cbString cellColors cmap crange maxColors
 clear titleString
 
-%% **********************************************************************
-% ***********************************************************************
+%% ************************************************************************
+% *************************************************************************
 %              PART 3: POTENTIAL DYNAMICS ESTIMATION
-% ***********************************************************************
-% ***********************************************************************
-clear; close all; clc;
+% *************************************************************************
+% *************************************************************************
 
-load('Point_Set_Manifold_dt2e-2_20241120.mat');
+% This is a logical place for a checkpoint. If you like, save the results
+% of the previous sections and just reload fresh here to avoid having to
+% simulate all of those points again.
+clear; close all; clc;
+load('Point_Set_Manifold_dt2e-2.mat');
 
 %%  Split Paths At Saddle Points ==========================================
 % This code consolidates the dense path list down to the minimal set of
@@ -723,17 +720,6 @@ if fitSaddles
         splitPathsAtIDx(allPaths, saddleIDx, XDE, []);
 
 end
-
-% If you want to let saddles slide along the path, the only field here that
-% would have to dynamically change would be IDs in fixPointIDx(isSaddle).
-% You'd then have to output a fixPointIDx for each optimization run
-%
-% fixPointIDx:  #numFix x 1 vector of fixed point IDs in XDE
-% isSaddle:     #numFix x 1 logical vector, true if the corresponding fixed
-%               point is a saddle
-% fixInPathIDx: #numPath x 2 matrix indicating the start and end point of
-%               each path in the 'fixPointIDx' list (all paths start and
-%               end with fixPoints)
 
 fixInPathIDx = cellfun(@(x) [x(1); x(end)], allPaths, 'Uni', false);
 fixInPathIDx = cell2mat(fixInPathIDx);
@@ -932,10 +918,10 @@ overwriteFit = false;
 overwriteFitOptions = false;
 
 % Set up fit results output directory
-fitFileDir = fullfile(projectDir, 'Static_Fits_symKLD_20250429');
+fitFileDir = fullfile(projectDir, ['Static_Fits_symKLD_' date]);
 if ~exist(fitFileDir, 'dir'), mkdir(fitFileDir); end
 fitFileBase = fullfile(fitFileDir, ...
-    'Static_Fit_dt5e-2_a_%0.2f_b_%0.2f_RI%d_20250429.mat');
+    ['Static_Fit_dt5e-2_a_%0.2f_b_%0.2f_RI%d_' date '.mat']);
 
 % Set Options -------------------------------------------------------------
 fitOptions = struct();
@@ -1039,17 +1025,18 @@ clear initGuess optOptions
 %% Consolidate Fit Results and Simulate Data ==============================
 close all; clc;
 
-% Uncomment to start from a fresh workspace
-clear; load('Point_Set_Manifold_PreFit_dt2e-2_dtL1e-3_20241120.mat');
+% Uncomment to start from a fresh workspace (save right before running the
+% "Fit Static Landscape" section)
+% clear; load('Point_Set_Manifold_PreFit_dt2e-2_dtL1e-3.mat');
 
 % Set the base potential
 if ~exist('UBDE', 'var'), UBDE = U0DE; end
 
 % Set up fit results output directory
-fitFileDir = fullfile(projectDir, 'Static_Fits_symKLD_20250429');
+fitFileDir = fullfile(projectDir, ['Static_Fits_symKLD_' date]);
 if ~exist(fitFileDir, 'dir'), mkdir(fitFileDir); end
 fitFileBase = fullfile(fitFileDir, ...
-    'Static_Fit_dt5e-2_a_%0.2f_b_%0.2f_RI%d_20250429.mat');
+    ['Static_Fit_dt5e-2_a_%0.2f_b_%0.2f_RI%d_' date '.mat']);
 
 % Load fit options
 load(fullfile(fitFileDir, 'fitOptions.mat'), 'fitOptions');
@@ -1305,7 +1292,7 @@ disp(['Generating Measured ' plotType ' Figure Panels:']);
 xLim = 2 * [-1 1];
 yLim = 2 * [-1 1];
 
-make3DPlot = true;
+make3DPlot = false;
 
 figure('Color', 'k');
 
@@ -1331,10 +1318,10 @@ for i = 1:numExpCond
             error('Invalid plot type');
         end
 
-        if tidx == (numExpTimes-1)
-            plotProb = exp(-UFunc(a, b, XDE(:,1), XDE(:,2)));
-            plotProb = plotProb ./ sum(plotProb) .* sum(allMeasDensities{i}(:, end));
-        end
+        % if tidx == (numExpTimes-1)
+        %     plotProb = exp(-UFunc(a, b, XDE(:,1), XDE(:,2)));
+        %     plotProb = plotProb ./ sum(plotProb) .* sum(allMeasDensities{i}(:, end));
+        % end
 
         % crange = prctile(plotProb, [0 98]);
         crange = [0, prctile(plotProb, 98)];
@@ -1914,7 +1901,7 @@ errorType = 'symKLD';
 allH = zeros(numExpCond, numExpTimes);
 
 cmap = parula(numel(timePoints));
-crange = [1 numel(timePoints)]; % [timePoints(1), timePoints(end)];
+crange = [1 numel(timePoints)];
 cticks = 1:numel(timePoints);
 cticklabels = cellfun(@num2str, num2cell(timePoints), 'Uni', false);
 cbString = 'Measured Time';
@@ -2003,459 +1990,3 @@ end
 sgtitle(errorType);
 
 clear a b measProb anaErr simErr xLim yLim
-
-%% View Ground State Probabilities/Densities for All Conditions ===========
-close all; clc;
-
-plotType = 'Density';
-if ~ismember(plotType, {'Density', 'Probability'})
-    error('Invalid plot type');
-end
-
-if ~exist('locMaxIDx', 'var')
-    if exist('densityEstimationOutput', 'var')
-        locMaxIDx = densityEstimationOutput.maxIDxDE;
-        locMaxIDx = densityEstimationOutput.XOut(locMaxIDx, :);
-        locMaxIDx = knnsearch(XDE, locMaxIDx);
-    else
-        locMaxIDx = [];
-    end
-end
-
-xLim = 2 * [-1 1];
-yLim = 2 * [-1 1];
-
-figure('Color', 'k');
-
-for i = 1:numExpCond
-
-    a = allExpParam(i,1);
-    b = allExpParam(i,2);
-    fpLambda = allFPLambdas{i};
-
-    sinkIDx = fpLambda < 0;
-    saddleIDx = fpLambda >= 0;
-
-    plotTrueProb = exp(-UFunc(a, b, XDE(:,1), XDE(:,2))  ./ ...
-        sodeSettings.DSODE);
-    if strcmpi(plotType, 'Probability')
-        plotSimProb = allSimResults(i).simGroundStateProb;
-        plotAnaProb = allSimResults(i).anaGroundStateProb;
-        plotTrueProb = exp(UODE) .* plotTrueProb;
-        plotTrueProb = plotTrueProb ./ sum(plotTrueProb);
-    elseif strcmpi(plotType, 'Density')
-        plotSimProb = allSimResults(i).simGroundStateDensity;
-        plotAnaProb = allSimResults(i).anaGroundStateProb;
-        plotAnaProb = plotAnaProb ./ sum(plotAnaProb) .* sum(plotTrueProb);
-    else
-        error('Invalid plot type');
-    end
-
-    sim_crange = [0, prctile(plotSimProb, 98)];
-    ana_crange = [0, prctile(plotAnaProb, 98)];
-    true_crange = [0, prctile(plotTrueProb, 98)];
-
-    % Plot Simulated Ground State -----------------------------------------
-
-    subplot(3, numExpCond, i);
-
-    hold on
-
-    pcshow([XDE, zeros(numPoints, 1)], plotSimProb);
-
-    scatter(allFixedPts{i}(sinkIDx, 1), allFixedPts{i}(sinkIDx, 2), ...
-        'filled', 'm', 'MarkerEdgeColor', 'k');
-    scatter(allFixedPts{i}(saddleIDx, 1), allFixedPts{i}(saddleIDx, 2), ...
-        'filled', 'c', 'MarkerEdgeColor', 'k');
-
-    hold off
-
-    axis equal square
-    xlim(xLim);
-    ylim(yLim);
-
-    view([0 90]);
-    camproj('orthographic');
-
-    cb = colorbar('Color', 'w');
-    set(gca, 'Clim', sim_crange);
-    set(gca, 'Colormap', brewermap(256, '*YlGnBu'));
-
-    set(gca, 'Color', 'k');
-    set(gca, 'YDir', 'normal');
-    set(gca, 'XColor', 'w', 'YColor', 'w', 'ZColor', 'w');
-
-    title(sprintf('Fit Ground State\na = %0.2f, b = %0.2f', a, b), ...
-        'Color', 'w');
-
-
-    % Plot Simulated Ground State for Analytic Potential ------------------
-
-    subplot(3, numExpCond, i+numExpCond);
-
-    hold on
-
-    pcshow([XDE, zeros(numPoints, 1)], plotAnaProb);
-
-    scatter(allFixedPts{i}(sinkIDx, 1), allFixedPts{i}(sinkIDx, 2), ...
-        'filled', 'm', 'MarkerEdgeColor', 'k');
-    scatter(allFixedPts{i}(saddleIDx, 1), allFixedPts{i}(saddleIDx, 2), ...
-        'filled', 'c', 'MarkerEdgeColor', 'k');
-
-    hold off
-
-    axis equal square
-    xlim(xLim);
-    ylim(yLim);
-
-    view([0 90]);
-    camproj('orthographic');
-
-    cb = colorbar('Color', 'w');
-    set(gca, 'Clim', ana_crange);
-    set(gca, 'Colormap', brewermap(256, '*YlGnBu'));
-
-    set(gca, 'Color', 'k');
-    set(gca, 'YDir', 'normal');
-    set(gca, 'XColor', 'w', 'YColor', 'w', 'ZColor', 'w');
-
-    title(sprintf('Analytic Ground State (Sim)\na = %0.2f, b = %0.2f', a, b), ...
-        'Color', 'w');
-
-    % Plot True Ground State for Analytic Potential -----------------------
-
-    subplot(3, numExpCond, i+2*numExpCond);
-
-    hold on
-
-    pcshow([XDE, zeros(numPoints, 1)], plotTrueProb);
-
-    scatter(allFixedPts{i}(sinkIDx, 1), allFixedPts{i}(sinkIDx, 2), ...
-        'filled', 'm', 'MarkerEdgeColor', 'k');
-    scatter(allFixedPts{i}(saddleIDx, 1), allFixedPts{i}(saddleIDx, 2), ...
-        'filled', 'c', 'MarkerEdgeColor', 'k');
-
-    hold off
-
-    axis equal square
-    xlim(xLim);
-    ylim(yLim);
-
-    view([0 90]);
-    camproj('orthographic');
-
-    cb = colorbar('Color', 'w');
-    set(gca, 'Clim', true_crange);
-    set(gca, 'Colormap', brewermap(256, '*YlGnBu'));
-
-    set(gca, 'Color', 'k');
-    set(gca, 'YDir', 'normal');
-    set(gca, 'XColor', 'w', 'YColor', 'w', 'ZColor', 'w');
-
-    title(sprintf('Analytic Ground State (True)\na = %0.2f, b = %0.2f', a, b), ...
-        'Color', 'w');
-
-end
-
-sgtitle(['Ground State ', plotType], 'Color', 'w');
-
-clear xLim yLim t tidx sinkIDx saddleIDx plotType plotSimProb plotAnaProb
-clear i fpLambda sim_crange ana_crange cb a b plotTrueProb true_crange
-
-%% Test Kernel Density Estimate of Invariant Measure ====================
-% Kernel density estimation does seem to return an essentially flawless
-% potential when points are directly sampled from the invariant measure. I
-% suppose this means that Euler-Maruyama is not really sampling the
-% invariant measure well at long times, but fixing that is outside our
-% scope
-close all; clc;
-
-numKDEPoints = 2.5e4;
-dt = 2e-2;
-
-if ~exist('locMaxIDx', 'var')
-    if exist('densityEstimationOutput', 'var')
-        locMaxIDx = densityEstimationOutput.maxIDxDE;
-        locMaxIDx = densityEstimationOutput.XOut(locMaxIDx, :);
-        locMaxIDx = knnsearch(XDE, locMaxIDx);
-    else
-        locMaxIDx = [];
-    end
-end
-
-xLim = 2 * [-1 1];
-yLim = 2 * [-1 1];
-
-figure('Color', 'k');
-
-make3DPlot = true;
-
-for i = 1:numExpCond
-
-    a = allExpParam(i,1);
-    b = allExpParam(i,2);
-    fpLambda = allFPLambdas{i};
-
-    sinkIDx = fpLambda < 0;
-    saddleIDx = fpLambda >= 0;
-
-    % Sample points from invariant measure using rejection sampling -----
-
-    constVal = 1.1 .* max(exp(-UFunc(a, b, ...
-        allFixedPts{i}(:,1), allFixedPts{i}(:,2)) ./ ...
-        sodeSettings.DSODE));
-    KDEX = nan(numKDEPoints, 2);
-
-    count = 1;
-    while count < (numKDEPoints+1)
-
-        curX = [diff(xLim) * rand(1) + xLim(1), ...
-        diff(yLim) * rand(1) + yLim(1)];
-        curProb = exp(-UFunc(a, b, curX(1), curX(2)) ./ ...
-            sodeSettings.DSODE);
-
-        if rand(1) < (curProb / constVal)
-            KDEX(count, :) = curX;
-            count = count+1;
-        end
-
-    end
-
-    clear constVal count curX curProb
-
-    % Plot estimated potential ------------------------------------------
-    
-    UKDE = -log(gaussianKDE(KDEX, XDE, [], sqrt(2 * dt), false, ...
-        [], [], true, true));
-    UKDE = UKDE - min(UKDE) + min(UFunc(a, b, XDE(:,1), XDE(:,2)));
-
-    % kde_crange = prctile(UKDE, [0 98]);
-    kde_crange = prctile(UFunc(a, b, XDE(:,1), XDE(:,2)), [0 98]);
-
-    subplot(2, numExpCond, i);
-
-    hold on
-
-    if make3DPlot
-
-        pcshow([XDE, UKDE], UKDE, 'MarkerSize', 15);
-
-        scatter3(allFixedPts{i}(sinkIDx, 1), allFixedPts{i}(sinkIDx, 2), ...
-            UKDE(knnsearch(XDE, allFixedPts{i}(sinkIDx, :))), ...
-            'filled', 'm', 'MarkerEdgeColor', 'k');
-        scatter3(allFixedPts{i}(saddleIDx, 1), allFixedPts{i}(saddleIDx, 2), ...
-            UKDE(knnsearch(XDE, allFixedPts{i}(saddleIDx, :))), ...
-            'filled', 'c', 'MarkerEdgeColor', 'k');
-
-    else
-
-        pcshow([XDE, zeros(numPoints, 1)], UKDE);
-
-        scatter(allFixedPts{i}(sinkIDx, 1), allFixedPts{i}(sinkIDx, 2), ...
-            'filled', 'm', 'MarkerEdgeColor', 'k');
-        scatter(allFixedPts{i}(saddleIDx, 1), allFixedPts{i}(saddleIDx, 2), ...
-            'filled', 'c', 'MarkerEdgeColor', 'k');
-
-    end
-
-    hold off
-
-    axis equal square
-    xlim(xLim);
-    ylim(yLim);
-
-    view([0 90]);
-    camproj('orthographic');
-
-    colorbar('Color', 'w');
-    set(gca, 'Clim', kde_crange);
-    set(gca, 'Colormap', brewermap(256, '*YlGnBu'));
-
-    set(gca, 'Color', 'k');
-    set(gca, 'YDir', 'normal');
-    set(gca, 'XColor', 'w', 'YColor', 'w', 'ZColor', 'w');
-
-    title(sprintf('Estimated Potential \na = %0.2f, b = %0.2f', a, b), ...
-        'Color', 'w');
-
-
-    % Plot analytic potential ------------------------------------------
-
-    ana_crange = prctile(UFunc(a, b, XDE(:,1), XDE(:,2)), [0 98]);
-
-    subplot(2, numExpCond, i+numExpCond);
-
-    hold on
-
-    if make3DPlot
-
-        pcshow([XDE, UFunc(a, b, XDE(:,1), XDE(:,2))], ...
-            UFunc(a, b, XDE(:,1), XDE(:,2)), 'MarkerSize', 15);
-
-        scatter3(allFixedPts{i}(sinkIDx, 1), allFixedPts{i}(sinkIDx, 2), ...
-            UFunc(a, b, allFixedPts{i}(sinkIDx, 1), ...
-            allFixedPts{i}(sinkIDx, 2)), ...
-            'filled', 'm', 'MarkerEdgeColor', 'k');
-        scatter3(allFixedPts{i}(saddleIDx, 1), allFixedPts{i}(saddleIDx, 2), ...
-            UFunc(a, b, allFixedPts{i}(saddleIDx, 1), ...
-            allFixedPts{i}(saddleIDx, 2)), ...
-            'filled', 'c', 'MarkerEdgeColor', 'k');
-
-    else
-
-        pcshow([XDE, zeros(numPoints, 1)], ...
-            UFunc(a, b, XDE(:,1), XDE(:,2)));
-
-        scatter(allFixedPts{i}(sinkIDx, 1), allFixedPts{i}(sinkIDx, 2), ...
-            'filled', 'm', 'MarkerEdgeColor', 'k');
-        scatter(allFixedPts{i}(saddleIDx, 1), allFixedPts{i}(saddleIDx, 2), ...
-            'filled', 'c', 'MarkerEdgeColor', 'k');
-
-    end
-
-    hold off
-
-    axis equal square
-    xlim(xLim);
-    ylim(yLim);
-
-    view([0 90]);
-    camproj('orthographic');
-
-    colorbar('Color', 'w');
-    set(gca, 'Clim', ana_crange);
-    set(gca, 'Colormap', brewermap(256, '*YlGnBu'));
-
-    set(gca, 'Color', 'k');
-    set(gca, 'YDir', 'normal');
-    set(gca, 'XColor', 'w', 'YColor', 'w', 'ZColor', 'w');
-
-    title(sprintf('Analytic Potential \na = %0.2f, b = %0.2f', a, b), ...
-        'Color', 'w');
-
-
-end
-
-clear numKDEPoints xLim yLim a b fpLambda sinkIDx saddleIDx
-clear cb make3DPlot ana_crange i KDEX UKDE kde_crange paramID
-
-%% Find Stable Fixed Points of the Potential ============================
-close all; clc;
-
-% plotD = 1e-3;
-plotD = 1e-2;
-
-xLim = 2 * [-1 1];
-yLim = 2 * [-1 1];
-
-for i = 1:numExpCond
-
-    a = allExpParam(i,1);
-    b = allExpParam(i,2);
-
-    fprintf('Processing basins for a = %0.2f and b = %0.2f:\n', a, b);
-
-    fpLambda = allFPLambdas{i};
-    sinkIDx = fpLambda < 0;
-    saddleIDx = fpLambda >= 0;
-
-    fprintf('Building log transition matrix... ');
-
-    logT = computeLogTransitionMatrix(XDE, allSimResults(i).UDE, dt, ...
-        'PointDiffusionCoefficient', 1, 'DiffusionCoefficient', plotD, ...
-        'ClipThreshold', 0, 'useGPU', true, ...
-        'ScalarMetric', allSimResults(i).scalarMetric / 10, ...
-        'PointPotential', U0DE, 'VolumeElementType', 'GraphLaplacian');
-
-    fprintf('Done\n');
-
-    fprintf('Computing ground state density... ')
-
-    curGroundStateDensity = evolveProbabilities( ...
-        ones(numPoints, 1) ./ numPoints, [], 1e3, ...
-        'NumViewTimes', 1, 'TimeStep', dt, ...
-        'LogTransitionMatrix', logT);
-    curGroundStateDensity = curGroundStateDensity ./ exp(U0DE);
-
-
-    fprintf('Done\n')
-
-    % Generate ground state density figure ------------------------------
-
-    cgs_crange = prctile(curGroundStateDensity, [0 99.9]);
-
-    subplot(2, numExpCond, i);
-
-    hold on
-
-    pcshow([XDE, zeros(numPoints, 1)], curGroundStateDensity, ...
-        'MarkerSize', 15);
-
-    scatter(allFixedPts{i}(sinkIDx, 1), allFixedPts{i}(sinkIDx, 2), ...
-        'm', 'MarkerEdgeColor', 'm', 'MarkerFaceColor', 'none', ...
-        'LineWidth', 2);
-    scatter(allFixedPts{i}(saddleIDx, 1), allFixedPts{i}(saddleIDx, 2), ...
-        'c', 'MarkerEdgeColor', 'c', 'MarkerFaceColor', 'none', ...
-        'LineWidth', 2);
-
-    hold off
-
-    axis equal square
-    xlim(xLim);
-    ylim(yLim);
-
-    view([0 90]);
-    camproj('orthographic');
-
-    colorbar('Color', 'w');
-    set(gca, 'Clim', cgs_crange);
-    set(gca, 'Colormap', brewermap(256, '*YlGnBu'));
-
-    set(gca, 'Color', 'k');
-    set(gca, 'YDir', 'normal');
-    set(gca, 'XColor', 'w', 'YColor', 'w', 'ZColor', 'w');
-
-    title(sprintf('Ground State Density \na = %0.2f, b = %0.2f', ...
-        a, b), 'Color', 'w');
-
-    % Generate final simulated density figure ---------------------------
-
-    sim_crange = prctile(allSimResults(i).simDensity(:,end), [0 99.9]);
-
-    subplot(2, numExpCond, i+numExpCond);
-
-    hold on
-
-    pcshow([XDE, zeros(numPoints, 1)], allSimResults(i).simDensity(:,end), ...
-        'MarkerSize', 15);
-
-    scatter(allFixedPts{i}(sinkIDx, 1), allFixedPts{i}(sinkIDx, 2), ...
-        'm', 'MarkerEdgeColor', 'm', 'MarkerFaceColor', 'none', ...
-        'LineWidth', 2);
-    scatter(allFixedPts{i}(saddleIDx, 1), allFixedPts{i}(saddleIDx, 2), ...
-        'c', 'MarkerEdgeColor', 'c', 'MarkerFaceColor', 'none', ...
-        'LineWidth', 2);
-
-    hold off
-
-    axis equal square
-    xlim(xLim);
-    ylim(yLim);
-
-    view([0 90]);
-    camproj('orthographic');
-
-    colorbar('Color', 'w');
-    set(gca, 'Clim', sim_crange);
-    set(gca, 'Colormap', brewermap(256, '*YlGnBu'));
-
-    set(gca, 'Color', 'k');
-    set(gca, 'YDir', 'normal');
-    set(gca, 'XColor', 'w', 'YColor', 'w', 'ZColor', 'w');
-
-    title(sprintf('Final Simulated Density \na = %0.2f, b = %0.2f', ...
-        a, b), 'Color', 'w');
-
-    disp(' ');
-
-end
