@@ -1,5 +1,5 @@
-function [basinProb, basinCounts, basinIDx, incPointIDx] = computeBasins( ...
-    X, T, pointProb, basinLocIDx, varargin)
+function [basinProb, basinCounts, basinIDx, incPointIDx, distMatrix] = ...
+    computeBasins(X, T, pointProb, basinLocIDx, varargin)
 %COMPUTEBASINS Assigns points in an input point cloud to a discrete set of
 %"basin" locations based on a user specified method and computes the total
 %probability for each basin.
@@ -100,6 +100,12 @@ function [basinProb, basinCounts, basinIDx, incPointIDx] = computeBasins( ...
 %                           particular point contributed to to its basin's
 %                           aggregate probability (i.e. if its probability
 %                           was above the threshold)
+%
+%       - distMatrix:       #N x #MB matrix of "distances" from each point
+%                           into the associated basins. These are the
+%                           criteria used to assign points to basins. For
+%                           'expectedValue', we take a maximum across rows,
+%                           and for the others we take a minimum
 %
 %   by Dillon Cislo 2024/05/20
 
