@@ -1,3 +1,8 @@
+# Build folders
+External/ngl-beta/ann_1.1.2/bin
+External/ngl-beta/build
+External/ngl-beta/bin
+
 # Prerequisites
 *.d
 
@@ -30,6 +35,7 @@
 *.exe
 *.out
 *.app
+*.mexa64
 
 # Data files
 *.tif

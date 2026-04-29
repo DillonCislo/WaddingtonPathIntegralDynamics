@@ -1,4 +1,0 @@
-/home/dillon/Documents/MATLAB/WaddingtonPathIntegralDynamics/External/ngl-beta/bin/getNeighborGraph
-/home/dillon/Documents/MATLAB/WaddingtonPathIntegralDynamics/External/ngl-beta/bin/getDelaunay
-/home/dillon/Documents/MATLAB/WaddingtonPathIntegralDynamics/External/ngl-beta/bin/drawEmptyRegion
-/home/dillon/Documents/MATLAB/WaddingtonPathIntegralDynamics/External/ngl-beta/bin/interactiveGraph
