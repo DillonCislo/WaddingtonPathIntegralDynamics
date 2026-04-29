@@ -149,7 +149,7 @@ if exist(buildDir, 'dir'), rmdir(buildDir, 's'); end
 mkdir(buildDir);
 cd(buildDir);
 
-[status, cmdout] = system('cmake ../');
+[status, cmdout] = system('cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ../');
 if (status == 0)
     if verbose
         disp(' ');
