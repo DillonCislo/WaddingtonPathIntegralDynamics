@@ -1,1 +1,0 @@
-/usr/bin/c++ -O3 -DNDEBUG -rdynamic CMakeFiles/interactiveGraph.dir/interactiveGraph.cpp.o -o interactiveGraph  -lGL -lGLU -lglut -lXi ../../ann_1.1.2/lib/libANN.a 
