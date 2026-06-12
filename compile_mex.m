@@ -63,3 +63,8 @@ compile_ngl(true); % <-- Set to 'true' for verbose output
 nglDir = fullfile(projectDir, 'Utility/ProximityGraphs/NGL');
 cd(nglDir);
 compile_proximity_graphs_ngl;
+
+% Compile parallel transport Dijkstra algorithm
+ptdDir = fullfile(projectDir, 'Utility/PointCloudParallelTransport');
+cd(ptdDir);
+compile_parallel_transport_dijkstra

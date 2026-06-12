@@ -155,7 +155,7 @@ try
 
 catch
 
-    parfor pID = 1:numPoints
+    for pID = 1:numPoints
 
         if verbose, progressbar(pID, numPoints); end
 
