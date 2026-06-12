@@ -37,6 +37,11 @@ clear; close all; clc;
 [projectDir, ~, ~] = fileparts(matlab.desktop.editor.getActiveFilename);
 cd(projectDir);
 
+% Set to true if you want to overwrite the pre-processed point set manifold
+% data
+overwriteManifoldData = true;
+overwritePreFitData = true;
+
 syms x y a b
 assume(x, 'real'); assume(y, 'real');
 assume(a, 'real'); assume(b, 'real');
@@ -612,7 +617,14 @@ if ~exist('allPaths', 'var') || recalculateUnstableManifolds
     
 end
 
+manifoldFileName = sprintf('Point_Set_Manifold_dt%0.2e.mat', dt);
+manifoldFileName = fullfile(projectDir, manifoldFileName);
+if ~exist(manifoldFileName, 'file') || overwriteManifoldData
+    save(manifoldFileName);
+end
+
 clear recalculateUnstableManifolds numUniqueMaxPairs locMaxIDx
+clear manifoldFileName
 
 %% View Subsampling Results ===============================================
 close all; clc;
@@ -693,7 +705,7 @@ clear titleString
 % of the previous sections and just reload fresh here to avoid having to
 % simulate all of those points again.
 clear; close all; clc;
-load('Point_Set_Manifold_dt2e-2.mat');
+load('Point_Set_Manifold_dt2.00e-02.mat');
 
 %%  Split Paths At Saddle Points ==========================================
 % This code consolidates the dense path list down to the minimal set of
@@ -850,7 +862,7 @@ if ( ~exist('LBDE', 'var') || ~exist('MDE', 'var') || recalculateDiffOperators )
 
     % Some Tikhonov regularization on the Laplacian to make it
     % negative-definite
-    LDE = LDE - 1e-16 * eye(size(LDE));
+    LDE = LDE - 1e-12 * eye(size(LDE));
 
     fprintf('Done\n');
 
@@ -898,6 +910,12 @@ for i = 1:numExpCond
 
     fprintf('Done\n');
 
+end
+
+preFitFileName = sprintf('Point_Set_Manifold_PreFit_dt%0.2e_dtL%0.2e.mat', dt, dtL);
+preFitFileName = fullfile(projectDir, preFitFileName);
+if ~exist(preFitFileName, 'file') || overwritePreFitData
+    save(preFitFileName);
 end
 
 clear i a b volumeElement measDensities tidx t curIDx curX measProb
@@ -1027,7 +1045,7 @@ close all; clc;
 
 % Uncomment to start from a fresh workspace (save right before running the
 % "Fit Static Landscape" section)
-% clear; load('Point_Set_Manifold_PreFit_dt2e-2_dtL1e-3.mat');
+% clear; load('Point_Set_Manifold_PreFit_dt2.00e-02_dtL1.00e-03.mat');
 
 % Set the base potential
 if ~exist('UBDE', 'var'), UBDE = U0DE; end
