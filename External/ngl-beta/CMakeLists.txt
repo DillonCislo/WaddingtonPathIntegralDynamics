@@ -1,6 +1,6 @@
+cmake_minimum_required(VERSION 2.6)
 PROJECT(EmptyRegionGraphs)
 
-cmake_minimum_required(VERSION 2.6)
 #SET (EXECUTABLE_OUTPUT_PATH ${CMAKE_CURRENT_SOURCE_DIR})
 SET (DEST ${CMAKE_CURRENT_SOURCE_DIR})
 
