@@ -3,11 +3,20 @@
 % well studied cotangent Laplacian on a spherical mesh
 clear; close all; clc;
 
-% numPoints = 8000;
+% Uniformly random sampling
+% numPoints = 3000;
 % X = randsphere(numPoints);
+% F = freeBoundary(delaunayTriangulation(X));
 
-[X, F] = subdivided_sphere(4);
-numPoints = size(X,1);
+% Blue noise sampling
+numPoints = 3000;
+[X, F] = subdivided_sphere(6);
+X = random_points_on_mesh(X, F, numPoints, 'Color', 'blue');
+F = freeBoundary(delaunayTriangulation(X));
+
+% Icosahedral subdivision
+% [X, F] = subdivided_sphere(4);
+% numPoints = size(X,1);
 
 % Compute a spherical harmonic on the point cloud
 l = randi(4)+1;

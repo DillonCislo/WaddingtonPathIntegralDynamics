@@ -124,11 +124,10 @@ else
 end
 
 if isfield(mapOptions, 'symmetrizetransitionoperator')
-    symmetrizeMB = mapOptions.symmetrizetransitionoperator;
-    validateattributes(symmetrizeMB, {'logical'}, {'scalar'});
+    warning('''SymmetrizeTransitionOperator'' option is deprecated');
+    % symmetrizeMB = mapOptions.symmetrizetransitionoperator;
+    % validateattributes(symmetrizeMB, {'logical'}, {'scalar'});
     mapOptions = rmfield(mapOptions, 'symmetrizetransitionoperator');
-else
-    symmetrizeMB = false;
 end
 
 if isfield(mapOptions, 'normalizedensity')
@@ -170,23 +169,30 @@ if normalizeDensity, KAlpha = KAlpha - diag(diag(KAlpha)); end
 
 % M = (D^{(\alpha)})^{-1} * K^{(\alpha)}
 DAlpha = sum(KAlpha, 2);
-MB = spdiags( 1./ DAlpha, 0, size(K,1), size(K,2) ) * KAlpha;    
+DAlphaMat = spdiags( DAlpha, 0, size(K,1), size(K,2) );
+% MB = spdiags( 1./ DAlpha, 0, size(K,1), size(K,2) ) * KAlpha;    
 
-if symmetrizeMB, MB = (MB + MB.')/2; end
+% This option is deprecated
+% symmetrizeMB = false;
+% if symmetrizeMB, MB = (MB + MB.')/2; end
 
 % Caluclate eigenvalues/eigenvectors
 % NOTE: Eigenvector output of both methods are normalized to 1
 if numEigs > 0
     
-    if (size(MB,1) > 1000) % issparse(MB)
+    if (numel(DAlpha) > 1000) % issparse(MB)
         
-        [V, lambda] = eigs(MB, numEigs, 'largestabs');
+        % [V, lambda] = eigs(MB, numEigs, 'largestabs');
+        [V, lambda] = eigs(KAlpha, DAlphaMat, 'numEigs', 'largestabs');
         lambda = diag(lambda);
         
     else
         
+        % Sparse matrices not supported for generalized eigenvalue problem
+        % [V, lambda] = eig(full(MB));
+        [V, lambda] = eig(full(KAlpha), full(DAlphaMat));
+        
         % 'eig' doesn't return the values sorted
-        [V, lambda] = eig(full(MB));
         [lambda, sortIDx] = sort(diag(lambda), 'descend');
         lambda = lambda(1:numEigs);
         V = V(:,sortIDx(1:numEigs));
