@@ -29,7 +29,8 @@ add_executable(
 	interactiveGraph
 	interactiveGraph.cpp
 )
-target_link_libraries(interactiveGraph ${OPENGL_LIBRARIES} ${GLUT_LIBRARY} ${ANN_LIBRARY})
+# target_link_libraries(interactiveGraph ${OPENGL_LIBRARIES} ${GLUT_LIBRARY} ${ANN_LIBRARY})
+target_link_libraries(interactiveGraph ${OPENGL_LIBRARIES} ${GLUT_LIBRARY} ${GLUT_LIBRARIES} ${ANN_LIBRARY})
 
 INSTALL(TARGETS interactiveGraph
         ARCHIVE DESTINATION ${DEST}/lib

@@ -31,6 +31,16 @@
 *.out
 *.app
 
+# NGL local build/install products
+External/ngl-beta/build/
+External/ngl-beta/bin/
+External/ngl-beta/ann_1.1.2/bin/
+
+# MATLAB compiled MEX outputs
+*.mexa64
+*.mexmaci64
+*.mexw64
+
 # Data files
 *.tif
 *.png
