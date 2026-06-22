@@ -1,19 +1,25 @@
-function [optErr, optFixHeights, optD, optScalarMetric, ...
-    optTimeScale, optTimes, optOutput] = fitStaticLandscape( ...
-    X, dataProb, dataTimes, dt, allPaths, varargin)
-%FITSTATICLANDSCAPE Fits a single static dynamical landscape to a set of
-%input time-series data by minimizing an average error metric (see below)
-%over each data point and its corresponding simulation point. The degrees
-%of freedom to be fit are:
+function [optErr, optFixHeights, optLoopHeights, optLoopSpeeds, optD, ...
+    optScalarMetric, optTimeScale, optTimes, optOutput, optRotV] = ...
+    fitStaticLandscapeWithOrbits( ...
+    X, dataProb, dataTimes, dt, allPaths, allLoops, varargin)
+%FITSTATICLANDSCAPEWITHORBITS Fits a single static dynamical landscape to a
+%set of input time-series data by minimizing an average error metric (see
+%below) over each data point and its corresponding simulation point. The
+%degrees of freedom to be fit are:
 %
-% (1) The heights of potential minima/saddles (stored in the same vector)
-% (2) A scalar (positive) diffusion constant D
-% (2) A uniform scalar metric (literally a single scalar constant), and
-% (3) An optional constant re-scaling of time that matches simulation time
+% (1) The heights of potential minima/saddles/points on loops connected to
+%     minima or saddles (stored in the same vector)
+% (2) The signed speeds around each periodic orbit (stored in
+%     the same vector)
+% (3) The heights of each periodic orbit (stored in the same vector)
+% (4) A scalar (positive) diffusion constant D
+% (5) A uniform scalar metric (literally a single scalar constant), and
+% (6) An optional constant re-scaling of time that matches simulation time
 % to physical time.
 % 
-%Options are included to fix the diffusion constant, scalar metric, or a
-%(subset) of the minima/saddle heights to user specified values.
+%Options are included to fix the diffusion constant, scalar metric, (a
+%subset of) the minima/saddle heights, (a subset of) the loop heights, or a
+%subset of) the loop speeds to user specified values.
 %
 %   INPUT PARAMETERS:
 %
@@ -38,19 +44,24 @@ function [optErr, optFixHeights, optD, optScalarMetric, ...
 %                       i.e. the times for all simulations are given by
 %                       [0 1 2 ... (numSimTimes-1)] * dt
 %
-%       - allPaths:     #P x 1 cell array. allPaths{i} is an an ordered
+%       - allPaths:     #P x 1 cell array. allPaths{i} is an ordered
 %                       list of point IDs defining that path. The end
 %                       points of each allPaths{i} correspond to the
-%                       minima/saddles in the point set. The ordering of
-%                       the values in the output 'fixHeights' is determined
-%                       by the sorted, unique IDs of the path end points
+%                       minima/saddles in the point set. Paths may also
+%                       terminate on a loop. The ordering of the values in
+%                       the output 'fixHeights' is determined by the
+%                       sorted, unique IDs of the path end points
+%
+%       - allLoops      #L x 1 cell array. allLoops{i} is an ordered list
+%                       of point IDs defining each loop and the positive
+%                       orientation around that loop. 
 %
 %   OPTIONAL INPUT ARGUMENTS (Name, Value)-Pairs:
 %
 %       - ('InitialGuess', initGuess = []); An initial guess for the
 %       parameters supplied as a vector of the form:
 %
-%           [ (heights); (D); (scalarMetric) ]
+%           [ (heights); (loop heights); (loop speeds); (D); (scalarMetric) ]
 %
 %       The user is responsible for ensuring the initial guess is feasible
 %       given the various imposed constraints. NOTE: the time scale output
@@ -73,6 +84,12 @@ function [optErr, optFixHeights, optD, optScalarMetric, ...
 %       determined from the 'allPaths' variable. This field must be
 %       specified in order to enforce the saddles.
 %
+%       - ('EnforceSaddles', enforceSaddles = false): Whether or not to
+%       enforce the constraint that index-1 saddles have a greater
+%       potential height than the corresponding minima (i.e. prevent
+%       saddles from becoming minima). Unless you have strong prior
+%       knowledge of the system, this should generally be set to false.
+%
 %       - ('EnforcePositiveDiffusion', enforcePositiveD = true): Whether to
 %       set a bound constraint on the diffusion coefficient. Be sure to
 %       choose a good initial condition if you turn this off!
@@ -81,14 +98,8 @@ function [optErr, optFixHeights, optD, optScalarMetric, ...
 %       or not to set a bound constraint on the scalar metric. Be sure to
 %       choose a good initial condition if you turn this off!
 %
-%       - ('EnforceSaddles', enforceSaddles = false): Whether or not to
-%       enforce the constraint that index-1 saddles have a greater
-%       potential height than the corresponding minima (i.e. prevent
-%       saddles from becoming minima). Unless you have strong prior
-%       knowledge of the system, this should generally be set to false.
-%
 %       - ('ConstHeightSum', constHeightSum = []): A user supplied constant
-%       that constrains the total sum of the minima/saddle heights.
+%       that constrains the total sum of the minima/saddle/loop heights.
 %
 %       - ('SimTimeHandling', simTimeHandling = 'none'): The method used to
 %       constrain the relationship between simulation time and physical
@@ -109,18 +120,26 @@ function [optErr, optFixHeights, optD, optScalarMetric, ...
 %           you have a good initial guess of the fit parameters, this
 %           should probably not be used.
 %
-%           - 'constant': Enforce a constand rescaling of physical time
+%           - 'constant': Enforce a constant rescaling of physical time
 %           matching it to simulation time, i.e. (simulation time) = 
 %           timeScale * (physical time). The variable 'timeScale' only has
 %           meaning if this option is selected.
 %
-%       - ('ConstTimeScale', constTimeScale = []): A user supplied constant
-%       time scale that maps simulation time into physical time. If
-%       supplied, this property is held fixed over optimization
-%
 %       - ('ConstFixedHeights', constFixHeights = []): A set of user
 %       supplied values for a subset of the minima/saddle heights, supplied
 %       a (numFixPoints) x 1 vector. Non-NaN entries correspond to
+%       specified values. If supplied, these fields are held fixed over
+%       optimization
+%
+%       - ('ConstLoopHeights', constLoopHeights = []): A set of user
+%       supplied values for a subset of the loop heights, supplied
+%       a (numLoops) x 1 vector. Non-NaN entries correspond to
+%       specified values. If supplied, these fields are held fixed over
+%       optimization
+%
+%       - ('ConstLoopSpeeds', constLoopSpeeds = []): A set of user
+%       supplied values for a subset of the loop speeds, supplied
+%       a (numLoops) x 1 vector. Non-NaN entries correspond to
 %       specified values. If supplied, these fields are held fixed over
 %       optimization
 %
@@ -134,9 +153,16 @@ function [optErr, optFixHeights, optD, optScalarMetric, ...
 %
 %       - ('PrecomputeQuadProg', precomputeQuadProg = true): Whether or not
 %       to precompute the solver information needed to compute the
-%       interpolated potential. This can help to significantly speed up the
-%       code, but can also lead to OOM error for large problems run in
-%       parallel.
+%       interpolated potential and rotational velocities. This can help to
+%       significantly speed up the code, but can also lead to OOM error for
+%       large problems run in parallel.
+%
+%       - ('RotationProblemType', rotMethod = 'bilaplacian-flat'): The
+%       structure of the quadratic problem used to compute the rotational
+%       velocities. If set to 'bilaplacian', the quadratic problem is set
+%       up using a true connection Laplacian. If set to
+%       'bilalplacian-flat', the scalar problem is solved using the
+%       standard Laplacian separately for each coordinate dimension.
 %
 %       - ('OptimizationOptions', optOptions = {}): A cell array containing
 %       options that can be supplied to a MATLAB 'optimoptions' object to
@@ -171,6 +197,10 @@ function [optErr, optFixHeights, optD, optScalarMetric, ...
 %   These fields are computed directly from (X, dt) if they are not
 %   supplied
 %
+%       - ('IntrinsicDimension', intDim = []): The intrinsic dimensionality
+%       of the point set manifold. Assumed to be the full dimension of the
+%       ambient space if not supplied.
+%
 %       - ('PointPotential', U0 = []): The auxilliary potential defining
 %       the equilibrium distribution from which the point set is assumed to
 %       be sampled.
@@ -184,22 +214,53 @@ function [optErr, optFixHeights, optD, optScalarMetric, ...
 %       - ('MassMatrix', M = []): #N x #N diagonal mass matrix
 %       corresponding to L
 %
+%       - ('ConnectionLaplacian', Lconn = []): (#N * intDim) x #N point
+%       cloud connection Laplacian
+%
+%       - ('ConnectionMassMatrix', Mconn = []): (#N * intDim) x #N
+%       diagonal mass matrix corresponding to Lconn
+%
+%       - ('PointCloudTangentBases', allBases = {}): #N x 1 cell array.
+%       allBases{i} is a dim x intDim array of orthonormal tangent space
+%       basis vectors for the point at X(i).
+%
+%       - ('ParallelTransportMaps', allPTMaps = {}): #P x #P cell array.
+%       allPTMaps{i,j} is the orthogonal transformation that maps vectors
+%       in T_{X(j)}M -> T_{X(i)}M. allPTMaps{i,j} is empty if A(i,j) is
+%       false. allPTMaps{i,i} is always the identity. note that
+%       allPTMaps{i,j} acts on ROW VECTORS from the RIGHT!
+%
+%   Loop Tangent Vector Options -------------------------------------------
+%
+%       - ('LoopTangentVectors', allLoopTangentVectors = {}): A #L x 1 cell
+%       array containing the unit tangent vectors at each point along each
+%       loop.
+%
+%       - ('LoopSmoothIters', loopSmoothIters = 0): The number of moving
+%       average smoothing iterations used to smooth the loop tangent
+%       vectors if none are explicitly supplied.
+%
 %   'interpolatePotentialKHarmonic' Options -------------------------------
 %
 %       - ('TikhonovRegularization', regSigma = 1e-12): A small positive
-%       quantity used to make the quadratic problem positive definite.
+%       quantity used to make the quadratic problem positive definite
 %
 %       - ('RemoveOutliers', removeOutliers = true): Whether or not to
-%       remove outliers generated during the interpolation process.
+%       remove outliers generated during the interpolation process
 %
 %       - ('OutlierThreshold', outlierThreshold = []): The threshold
 %       above and below which outliers are removed. If empty and
 %       removeOutliers == true, this is automatically set from the values
 %       of interpVals
 %
+%       - ('RotationalVelocityOutlierThreshold', rotOutlierThreshold = []):
+%       The threshold on velocity norm above and below which outliers are
+%       removed. If empty and removeOutliers == true, this is automatically
+%       set from the values of interpVals
+%
 %       - ('OutlierNeighbors', outlierNNSize = 10): The number of neighbors
 %       over which to average to in order to find the new value for any
-%       removed outliers.
+%       removed outliers
 %
 %       - ('NormalizeMassMatrix', normalizeMassMatrix = true): Whether or
 %       not to normalize the mass matrix by its largest value (see
@@ -210,13 +271,13 @@ function [optErr, optFixHeights, optD, optScalarMetric, ...
 %       - ('PathLengths', allPathLengths = {}): A #P x 1 cell array
 %       containing the length of each each edge in the associated path
 %       (This doesn't have to just be physical length - you can supply any
-%       set of positive weights)
+%       set of positive weights).
 %
 %       - ('PathInterpolationMethod', pathInterpMethod = 'weighted'):
 %       Whether to interpolate using the path length weights or to just
 %       interpolate according to the number of points along the path. If no
 %       path lengths are supplied, 'weighted' and 'unweighted' are
-%       equivalent
+%       equivalent.
 %
 %       - ('PathCollisionMethod', pathCollisionMethod = 'mean'): How to
 %       handle the case where multiple paths intersect at a subset of the
@@ -254,9 +315,13 @@ function [optErr, optFixHeights, optD, optScalarMetric, ...
 %                           optimized simulated time courses and their
 %                           corresponding data sets
 %
-%       - optFixHeights:    1 x #H list of optimizes minima/saddle heights.
+%       - optFixHeights:    1 x #H list of optimized minima/saddle heights.
 %                           Ordering in this list is determined from the
 %                           'allPaths' input variable
+%
+%       - optLoopHeights:   1 x #L list of optimized loop heights.
+%
+%       - optLoopSpeeds:    1 x #L list of optimized loop speeds.
 %
 %       - optD:             The optimized dynamical diffusion coefficient
 %
@@ -273,7 +338,10 @@ function [optErr, optFixHeights, optD, optScalarMetric, ...
 %                           optimization process. See 'fmincon' or
 %                           'fminunc'
 %
-%   by Dillon Cislo 2024/04/01
+%       - optRotV:         #N x dim matrix of optimized rotational
+%                           velocities
+%
+%   by Dillon Cislo 2026/06/17
 
 %==========================================================================
 % INPUT PROCESSING
@@ -296,23 +364,85 @@ validateattributes(dt, {'numeric'}, {'scalar', 'positive', ...
 
 validateattributes(allPaths, {'cell'}, {'vector'});
 numPaths = numel(allPaths);
+assert(numPaths > 0, 'No paths supplied');
 cellfun(@(x) validateattributes(x, {'numeric'}, {'vector', 'integer', ...
     'positive', 'finite', 'real', '<=', numPoints}), ...
     allPaths, 'Uni', false);
 assert(all(cellfun(@(x) numel(x) > 1, allPaths, 'Uni', true)), ...
     'Paths must have at least two points');
+assert(all(cellfun(@(x) isequal(x, unique(x, 'stable')), ...
+    allPaths, 'Uni', true)), 'Paths contain duplicate points');
 allPaths = cellfun(@(x) x(:), allPaths, 'Uni', false);
 allPaths = allPaths(:);
 
+validateattributes(allLoops, {'cell'}, {'vector'});
+numLoops = numel(allLoops);
+assert(numLoops > 0, ['You should not be using this function without ' ...
+    'any periodic orbits. Consider "fitStaticLandsacpe" instead.']);
+cellfun(@(x) validateattributes(x, {'numeric'}, {'vector', 'integer', ...
+    'positive', 'finite', 'real', '<=', numPoints}), ...
+    allLoops, 'Uni', false);
+allLoops = cellfun(@(x) x(1:(end-(x(end) == x(1)))), ...
+    allLoops, 'Uni', false);
+allLoops = cellfun(@(x) x(:), allLoops, 'Uni', false);
+assert(all(cellfun(@(x) numel(x) > 2, allLoops, 'Uni', true)), ...
+    'Loops must have at least three points');
+assert(all(cellfun(@(x) isequal(x, unique(x, 'stable')), ...
+    allLoops, 'Uni', true)), 'Loops contain duplicate points');
+allLoops = allLoops(:);
+
+% Clip paths so that they never contain more than one loop point either at
+% the end or the beginning
+allLoopIDx = vertcat(allLoops{:});
+allLoopIDx = allLoopIDx(:);
+assert(numel(allLoopIDx) == numel(unique(allLoopIDx)), ...
+    'Loops must not share points');
+pathEdgeKeepIDx = cell(numPaths, 1);
+for i = 1:numPaths
+    rmIDx = ismember(allPaths{i}, allLoopIDx);
+    hasLoopIntersection = any(rmIDx);
+    if ~hasLoopIntersection
+        keepIDx = true(size(allPaths{i}));
+    elseif find(~rmIDx, 1, 'last' ) < find(rmIDx, 1, 'first')
+        % If loop points come at the end of the path
+        rmIDx = [false; rmIDx(2:end) & rmIDx(1:(end-1))];
+        keepIDx = ~rmIDx;
+    elseif find(rmIDx, 1, 'last') < find(~rmIDx, 1, 'first')
+        % If loop points come at the start of the path
+        rmIDx = [rmIDx(2:end) & rmIDx(1:(end-1)); false];
+        keepIDx = ~rmIDx;
+    else
+        error('Path %d contains invalid loop intersections', i)
+    end
+    % Edge j survives iff both endpoint vertices survive.
+    pathEdgeKeepIDx{i} = keepIDx(1:(end-1)) & keepIDx(2:end);
+    allPaths{i} = allPaths{i}(keepIDx);
+    if hasLoopIntersection
+        assert(sum(ismember(allPaths{i}, allLoopIDx)) == 1, ...
+            'Failed to clip loop points from path %d', i);
+    end
+end
+
 % fixPointIDx: The unique set of indices in 'X' corresponding to
-% minima/saddles
-% fixInPathIDx: #Px2 array of indices into 'fixPointIDx' mapping
-% minima/saddles back into their corresponding paths
+% minima/saddles/loop termini, i.e. numel(fixPointIDx) == (# minima) + (#
+% saddles) + (# loops)
+% fixInPathIDx: #Px2 array of indices into fixPointIDx
+% mapping minima/saddles/loop back into their corresponding paths
 fixInPathIDx = cellfun(@(x) [x(1); x(end)], allPaths, 'Uni', false);
 fixInPathIDx = cell2mat(fixInPathIDx);
-[fixPointIDx, ~, fixInPathIDx] = unique(reshape(fixInPathIDx.', [], 1));
+fixPointIDx = unique(reshape(fixInPathIDx.', [], 1));
+fixPointIDx(ismember(fixPointIDx, allLoopIDx)) = [];
+fixPointIDx = [fixPointIDx; cellfun(@(x) x(1), allLoops, 'Uni', true)];
+for i = 1:numLoops
+    fixInPathIDx(ismember(fixInPathIDx, allLoops{i})) = allLoops{i}(1);
+end
+[~, fixInPathIDx] = ismember(fixInPathIDx, fixPointIDx);
 fixInPathIDx = reshape(fixInPathIDx, [2 numPaths]).';
 numFixPoints = numel(fixPointIDx);
+numNonLoopFixPoints = numFixPoints - numLoops;
+assert(all(fixInPathIDx(:) > 0) && ...
+    all(ismember((1:numNonLoopFixPoints).', fixInPathIDx(:))), ...
+    'Failed to assign path endpoints');
 
 %--------------------------------------------------------------------------
 % OPTIONAL INPUT PROCESSING
@@ -328,10 +458,13 @@ enforcePositiveDiffusion = true;
 enforcePositiveMetric = true;
 constHeightSum = [];
 simTimeHandling = 'none';
-constFixHeights = nan(numFixPoints, 1);
+constFixHeights = nan(numNonLoopFixPoints, 1);
+constLoopHeights = nan(numLoops, 1);
+constLoopSpeeds = nan(numLoops, 1);
 constD = [];
 constScalarMetric = [];
 precomputeQuadProg = true;
+rotMethod = 'bilaplacian-flat';
 optOptions = {};
 upperBounds = [];
 lowerBounds = [];
@@ -341,20 +474,31 @@ dataSetWeights = [];
 simTimeHandlingOptions = {'none', 'causal', 'constant'};
 allErrorTypes = lower({'symKLD', 'dataKLD', 'simKLD', ...
     'MSE', 'geoSphere', 'EMD'});
+allRotMethods = {'bilaplacian', 'bilaplacian-flat'};
 
 % Physical constants
 D0 = 1;
 
 % Manifold/point set/potential properties
+intDim = [];
 U0 = [];
 UB = [];
 L = [];
 M = [];
+Lconn = [];
+Mconn = [];
+allBases = {};
+allPTMaps = {};
+
+% Loop tangent vector options
+allLoopTangentVectors = {};
+loopSmoothIters = 0;
 
 % 'interpolatePotentialKHarmonic' options
 regSigma = 1e-12;
 removeOutliers = true;
 outlierThreshold = [];
+rotOutlierThreshold = [];
 outlierNNSize = 10;
 normalizeMassMatrix = true;
 
@@ -385,7 +529,11 @@ supportedOptions = {'InitialConditions', 'NumSimTimes', 'IsSaddle', ...
     'UseGPU', 'InitialGuess', 'EnforcePositiveMetric', ...
     'PrecomputeQuadProg', 'VolumeElementType', 'UpperBounds', ...
     'LowerBounds', 'ErrorType', 'DataSetWeights', ...
-    'EnforcePositiveDiffusion'};
+    'EnforcePositiveDiffusion', 'ConstLoopHeights', 'ConstLoopSpeeds', ...
+    'IntrinsicDimension', 'ConnectionLaplacian', 'ConnectionMassMatrix', ...
+    'RotationProblemType', 'LoopTangentVectors', 'LoopSmoothIters', ...
+    'RotationalVelocityOutlierThreshold', 'PointCloudTangentBases', ...
+    'ParallelTransportMaps'};
 checkSupportedOptions(supportedOptions, varargin);
 
 for i = 1:length(varargin)
@@ -401,7 +549,7 @@ for i = 1:length(varargin)
         if ~isempty(initGuess)
             validateattributes(initGuess, {'numeric'}, ...
                 {'vector', 'finite', 'real'}, ...
-                'fitStaticLandScape', 'initGuess');
+                'fitStaticLandscapeWithOrbits', 'initGuess');
             if (size(initGuess, 2) ~= 1), initGuess = initGuess.'; end
         end
     end
@@ -413,7 +561,7 @@ for i = 1:length(varargin)
         else
             validateattributes(initConditions, {'cell'}, ...
                 {'vector', 'numel', numDataSets}, ...
-                'fitStaticLandScape', 'initConditions');
+                'fitStaticLandscapeWithOrbits', 'initConditions');
         end
     end
 
@@ -421,7 +569,7 @@ for i = 1:length(varargin)
         numSimTimes = varargin{i+1};
         validateattributes(numSimTimes, {'numeric'}, ...
             {'scalar', 'positive', 'integer', 'finite', 'real'}, ...
-            'fitStaticLandscape', 'numSimTimes');
+            'fitStaticLandscapeWithOrbits', 'numSimTimes');
     end
 
     if strcmpi(varargin{i}, 'IsSaddle')
@@ -434,16 +582,16 @@ for i = 1:length(varargin)
         else
             validateattributes(isSaddle, {'numeric'}, ...
                 {'vector', 'integer', 'positive', 'finite', 'real', ...
-                '<=', numFixedPoints}, ...
-                'fitStaticLandscape', 'isSaddle');
-            isSaddle = ismember((1:numFixedPoints).', isSaddle);
+                '<=', numFixPoints}, ...
+                'fitStaticLandscapeWithOrbits', 'isSaddle');
+            isSaddle = ismember((1:numFixPoints).', isSaddle);
         end
     end
 
     if strcmpi(varargin{i}, 'EnforceSaddles')
         enforceSaddles = varargin{i+1};
         validateattributes(enforceSaddles, {'logical'}, {'scalar'}, ...
-            'fitStaticLandscape', 'enforceSaddles');
+            'fitStaticLandscapeWithOrbits', 'enforceSaddles');
     end
 
     if strcmpi(varargin{i}, 'EnforcePositiveDiffusion')
@@ -455,7 +603,7 @@ for i = 1:length(varargin)
     if strcmpi(varargin{i}, 'EnforcePositiveMetric')
         enforcePositiveMetric = varargin{i+1};
         validateattributes(enforcePositiveMetric, {'logical'}, {'scalar'}, ...
-            'fitStaticLandscape', 'enforcePositiveMetric');
+            'fitStaticLandscapeWithOrbits', 'enforcePositiveMetric');
     end
 
     if strcmpi(varargin{i}, 'ConstHeightSum')
@@ -463,14 +611,14 @@ for i = 1:length(varargin)
         if ~isempty(constHeightSum)
             validateattributes(constHeightSum, {'numeric'}, ...
                 {'scalar', 'finite', 'real'}, ...
-                'fitStaticLandscape', 'constHeightSum');
+                'fitStaticLandscapeWithOrbits', 'constHeightSum');
         end
     end
 
     if strcmpi(varargin{i}, 'SimTimeHandling')
         simTimeHandling = lower(varargin{i+1});
         validateattributes(simTimeHandling, {'char'}, {'vector'}, ...
-            'fitStaticLandscape', 'simTimeHandling');
+            'fitStaticLandscapeWithOrbits', 'simTimeHandling');
         assert(ismember(simTimeHandling, simTimeHandlingOptions), ...
             'Invalid simulation time handling option supplied');
     end
@@ -479,8 +627,35 @@ for i = 1:length(varargin)
         constFixHeights = varargin{i+1};
         if ~isempty(constFixHeights)
             assert(isvector(constFixHeights) && ...
-                numel(constFixHeights) == numFixPoints, ...
+                numel(constFixHeights) == numNonLoopFixPoints, ...
                 'Constrained heights are improperly sized');
+            constFixHeights = constFixHeights(:);
+        else
+            constFixHeights = nan(numNonLoopFixPoints, 1);
+        end
+    end
+
+    if strcmpi(varargin{i}, 'ConstLoopHeights')
+        constLoopHeights = varargin{i+1};
+        if ~isempty(constLoopHeights)
+            assert(isvector(constLoopHeights) && ...
+                numel(constLoopHeights) == numLoops, ...
+                'Constrained loop heights are improperly sized');
+            constLoopHeights = constLoopHeights(:);
+        else
+            constLoopHeights = nan(numLoops, 1);
+        end
+    end
+
+    if strcmpi(varargin{i}, 'ConstLoopSpeeds')
+        constLoopSpeeds = varargin{i+1};
+        if ~isempty(constLoopSpeeds)
+            assert(isvector(constLoopSpeeds) && ...
+                numel(constLoopSpeeds) == numLoops, ...
+                'Constrained loop speeds are improperly sized');
+            constLoopSpeeds = constLoopSpeeds(:);
+        else
+            constLoopSpeeds = nan(numLoops, 1);
         end
     end
 
@@ -489,7 +664,7 @@ for i = 1:length(varargin)
         if ~isempty(constD)
             validateattributes(constD, {'numeric'}, ...
                 {'scalar', 'positive', 'finite', 'real'}, ...
-                'fitStaticLandscape', 'constD');
+                'fitStaticLandscapeWithOrbits', 'constD');
         end
     end
 
@@ -498,28 +673,36 @@ for i = 1:length(varargin)
         if ~isempty(constScalarMetric)
             validateattributes(constScalarMetric, {'numeric'}, ...
                 {'scalar', 'positive', 'finite', 'real'}, ...
-                'fitStaticLandscape', 'constScalarMetric');
+                'fitStaticLandscapeWithOrbits', 'constScalarMetric');
         end
     end
 
     if strcmpi(varargin{i}, 'PrecomputeQuadProg')
         precomputeQuadProg = varargin{i+1};
         validateattributes(precomputeQuadProg, {'logical'}, {'scalar'}, ...
-            'fitStaticLandscape', 'precomputeQuadProg');
+            'fitStaticLandscapeWithOrbits', 'precomputeQuadProg');
+    end
+
+    if strcmpi(varargin{i}, 'RotationProblemType')
+        rotMethod = varargin{i+1};
+        validateattributes(rotMethod, {'char'}, {'vector'}, ...
+            'fitStaticLandscapeWithOrbits', 'rotMethod');
+        assert(ismember(lower(rotMethod), allRotMethods), ...
+            'Invalid rotation problem type supplied');
     end
 
     if strcmpi(varargin{i}, 'OptimizationOptions')
         optOptions = varargin{i+1};
         validateattributes(optOptions, {'cell'}, {'vector'}, ...
-            'fitStaticLandscape', 'optOptions');
+            'fitStaticLandscapeWithOrbits', 'optOptions');
     end
 
     if strcmpi(varargin{i}, 'UpperBounds')
         upperBounds = varargin{i+1};
         if ~isempty(upperBounds)
             validateattributes(upperBounds, {'numeric'}, {'vector', ...
-                'numel', numFixPoints+2, 'nonnan'}, ...
-                'fitStaticLandscape', 'upperBounds');
+                'numel', numFixPoints+numLoops+2, 'nonnan'}, ...
+                'fitStaticLandscapeWithOrbits', 'upperBounds');
             if (size(upperBounds, 2) ~= 1)
                 upperBounds = upperBounds .';
             end
@@ -530,8 +713,8 @@ for i = 1:length(varargin)
         lowerBounds = varargin{i+1};
         if ~isempty(lowerBounds)
             validateattributes(lowerBounds, {'numeric'}, {'vector', ...
-                'numel', numFixPoints+2, 'nonnan'}, ...
-                'fitStaticLandscape', 'lowerBounds');
+                'numel', numFixPoints+numLoops+2, 'nonnan'}, ...
+                'fitStaticLandscapeWithOrbits', 'lowerBounds');
             if (size(lowerBounds, 2) ~= 1)
                 lowerBounds = lowerBounds .';
             end
@@ -541,7 +724,7 @@ for i = 1:length(varargin)
     if strcmpi(varargin{i}, 'ErrorType')
         errorType = varargin{i+1};
         validateattributes(errorType, {'char'}, {'vector'}, ...
-            'fitStaticLandscape', 'errorType');
+            'fitStaticLandscapeWithOrbits', 'errorType');
         assert(ismember(lower(errorType), allErrorTypes), ...
             'Invalid error type supplied');
     end
@@ -551,7 +734,7 @@ for i = 1:length(varargin)
         if ~isempty(dataSetWeights)
             validateattributes(dataSetWeights, {'numeric'}, ...
                 {'vector', 'finite', 'positive', 'real'}, ...
-                'fitStaticLandscape', 'dataSetWeights');
+                'fitStaticLandscapeWithOrbits', 'dataSetWeights');
             if (size(dataSetWeights, 1) ~= 1)
                 dataSetWeights = dataSetWeights.';
             end
@@ -564,17 +747,26 @@ for i = 1:length(varargin)
         D0 = varargin{i+1};
         validateattributes(D0, {'numeric'}, ...
             {'scalar', 'positive', 'finite', 'real'}, ...
-            'fitStaticLandscape', 'D0');
+            'fitStaticLandscapeWithOrbits', 'D0');
     end
 
     % Manifold/Point Set/Potential Properties -----------------------------
+
+    if strcmpi(varargin{i}, 'IntrinsicDimension')
+        intDim = varargin{i+1};
+        if ~isempty(intDim)
+            validateattributes(intDim, {'numeric'}, {'scalar', ...
+                'positive', 'integer', 'finite', 'real'}, ...
+                'fitStaticLandscapeWithOrbits', 'intDim');
+        end
+    end
 
     if strcmpi(varargin{i}, 'PointPotential')
         U0 = varargin{i+1};
         if ~isempty(U0)
             validateattributes(U0, {'numeric'}, {'vector', ...
                 'finite', 'real', 'numel', numPoints}, ...
-                'fitStaticLandscape', 'U0');
+                'fitStaticLandscapeWithOrbits', 'U0');
             if (size(U0,2) ~= 1), U0 = U0.'; end
         end
     end
@@ -584,7 +776,7 @@ for i = 1:length(varargin)
         if ~isempty(UB)
             validateattributes(UB, {'numeric'}, {'vector', ...
                 'finite', 'real', 'numel', numPoints}, ...
-                'fitStaticLandscape', 'UB');
+                'fitStaticLandscapeWithOrbits', 'UB');
             if (size(UB,2) ~= 1), UB = UB.'; end
         end
     end
@@ -593,19 +785,60 @@ for i = 1:length(varargin)
 
     if strcmpi(varargin{i}, 'MassMatrix'), M = varargin{i+1}; end
 
+    if strcmpi(varargin{i}, 'ConnectionLaplacian')
+        Lconn = varargin{i+1};
+    end
+
+    if strcmpi(varargin{i}, 'ConnectionMassMatrix')
+        Mconn = varargin{i+1};
+    end
+
+    if strcmpi(varargin{i}, 'PointCloudTangentBases')
+        allBases = varargin{i+1};
+    end
+
+    if strcmpi(varargin{i}, 'ParallelTransportMaps')
+        allPTMaps = varargin{i+1};
+    end
+
+    % Loop Tangent Vector Options -----------------------------------------
+
+    if strcmpi(varargin{i}, 'LoopTangentVectors')
+        allLoopTangentVectors = varargin{i+1};
+        if ~isempty(allLoopTangentVectors)
+            validateattributes(allLoopTangentVectors, {'cell'}, {'vector', ...
+                'numel', numLoops}, 'fitStaticLandscapeWithOrbits', ...
+                'allLoopTangentVectors');
+            if size(allLoopTangentVectors, 2) ~= 1
+                allLoopTangentVectors = allLoopTangentVectors.';
+            end
+            cellfun(@(x, y) validateattributes(x, {'numeric'}, {'2d', ...
+                'finite', 'real', 'ncols', dim, 'nrows', numel(y)}, ...
+                'fitStaticLandscapeWithOrbits', 'allLoopTangentVectors'), ...
+                allLoopTangentVectors, allLoops, 'Uni', false);
+        end
+    end
+
+    if strcmpi(varargin{i}, 'LoopSmoothIters')
+        loopSmoothIters = varargin{i+1};
+        validateattributes(loopSmoothIters, {'numeric'}, {'scalar', ...
+            'integer', 'finite', 'real'}, ...
+            'fitStaticLandscapeWithOrbits', 'loopSmoothIters');
+    end
+
     % 'interpolatePotentialKHarmonic' Options -----------------------------
 
     if strcmpi(varargin{i}, 'TikhonovRegularization')
         regSigma = varargin{i+1};
         validateattributes(regSigma, {'numeric'}, ...
             {'scalar', 'nonnegative', 'finite', 'real'}, ...
-            'fitStaticLandscape', 'regSigma');
+            'fitStaticLandscapeWithOrbits', 'regSigma');
     end
 
     if strcmpi(varargin{i}, 'RemoveOutliers')
         removeOutliers = varargin{i+1};
         validateattributes(removeOutliers, {'logical'}, {'scalar'}, ...
-            'fitStaticLandscape', 'removeOutliers');
+            'fitStaticLandscapeWithOrbits', 'removeOutliers');
     end
 
     if strcmpi(varargin{i}, 'OutlierThreshold')
@@ -613,8 +846,20 @@ for i = 1:length(varargin)
         if ~isempty(outlierThreshold)
             validateattributes(outlierThreshold, {'numeric'}, ...
                 {'vector', 'numel', 2, 'finite', 'real'}, ...
-                'fitStaticLandscape', 'outlierThreshold');
+                'fitStaticLandscapeWithOrbits', 'outlierThreshold');
             assert(outlierThreshold(2) > outlierThreshold(1), ...
+                ['Outlier threshold must have a second element ' ...
+                'that is greater than its first element']); 
+        end
+    end
+
+    if strcmpi(varargin{i}, 'RotationalVelocityOutlierThreshold')
+        rotOutlierThreshold = varargin{i+1};
+        if ~isempty(rotOutlierThreshold)
+            validateattributes(rotOutlierThreshold, {'numeric'}, ...
+                {'vector', 'numel', 2, 'finite', 'real'}, ...
+                'fitStaticLandscapeWithOrbits', 'rotOutlierThreshold');
+            assert(rotOutlierThreshold(2) > rotOutlierThreshold(1), ...
                 ['Outlier threshold must have a second element ' ...
                 'that is greater than its first element']); 
         end
@@ -624,13 +869,13 @@ for i = 1:length(varargin)
         outlierNNSize = varargin{i+1};
         validateattributes(outlierNNSize, {'numeric'}, ...
             {'positive', 'integer', 'scalar', 'finite', 'real'}, ...
-            'fitStaticLandscape', 'outlierNNSize');
+            'fitStaticLandscapeWithOrbits', 'outlierNNSize');
     end
 
     if strcmpi(varargin{i}, 'NormalizeMassMatrix')
         normalizeMassMatrix = varargin{i+1};
         validateattributes(normalizeMassMatrix, {'logical'}, {'scalar'}, ...
-            'fitStaticLandscape', 'normalizeMassMatrix');
+            'fitStaticLandscapeWithOrbits', 'normalizeMassMatrix');
     end
 
     % 'interpolateValuesAlongPath' Options --------------------------------
@@ -639,19 +884,34 @@ for i = 1:length(varargin)
         allPathLengths = varargin{i+1};
         validateattributes(allPathLengths, {'cell'}, ...
             {'vector', 'numel', numPaths}, ...
-            'fitStaticLandscape', 'allPathLengths');
+            'fitStaticLandscapeWithOrbits', 'allPathLengths');
+        allPathLengths = allPathLengths(:);
+        for jj = 1:numPaths
+
+            validateattributes(allPathLengths{jj}, {'numeric'}, ...
+                {'vector', 'positive', 'finite', 'real', ...
+                'numel', numel(pathEdgeKeepIDx{jj})}, ...
+                'fitStaticLandscapeWithOrbits', 'allPathLengths');
+
+            allPathLengths{jj} = allPathLengths{jj}(:);
+            allPathLengths{jj} = allPathLengths{jj}(pathEdgeKeepIDx{jj});
+
+            assert(numel(allPathLengths{jj}) == numel(allPaths{jj}) - 1, ...
+                'Path length clipping failed for path %d', jj);
+
+        end
     end
 
     if strcmpi(varargin{i}, 'PathInterpolationMethod')
         pathInterpMethod = lower(varargin{i+1});
         validateattributes(pathInterpMethod, {'char'}, {'vector'}, ...
-            'fitStaticLandscape', 'PathInterpolationMethod');
+            'fitStaticLandscapeWithOrbits', 'PathInterpolationMethod');
     end
 
     if strcmpi(varargin{i}, 'PathCollisionMethod')
         pathCollisionMethod = lower(varargin{i+1});
         validateattributes(pathCollisionMethod, {'char'}, {'vector'}, ...
-            'fitStaticLandscape', 'pathCollisionMethod');
+            'fitStaticLandscapeWithOrbits', 'pathCollisionMethod');
     end
 
     % 'computeTransitionMatrix' Options -----------------------------------
@@ -660,19 +920,19 @@ for i = 1:length(varargin)
         clipThreshold = varargin{i+1};
         validateattributes(clipThreshold, {'numeric'}, ...
             {'scalar', 'nonnegative', 'finite', 'real'}, ...
-            'fitStaticLandscape', 'clipThreshold');
+            'fitStaticLandscapeWithOrbits', 'clipThreshold');
     end
 
     if strcmpi(varargin{i}, 'StrictNormalization')
         strictNormalization = varargin{i+1};
         validateattributes(strictNormalization, {'logical'}, {'scalar'}, ...
-            'fitStaticLandscape', 'strictNormalization');
+            'fitStaticLandscapeWithOrbits', 'strictNormalization');
     end
 
     if strcmpi(varargin{i}, 'VolumeElementType')
         volumeType = lower(varargin{i+1});
         validateattributes(volumeType, {'char'}, {'vector'}, ...
-            'fitStaticLandscape', 'volumeType');
+            'fitStaticLandscapeWithOrbits', 'volumeType');
         assert(ismember(volumeType, allVolumeTypes), ...
             'Invalid volume element type');
     end
@@ -682,13 +942,13 @@ for i = 1:length(varargin)
     if strcmpi(varargin{i}, 'UseGPU')
         useGPU = varargin{i+1};
         validateattributes(useGPU, {'logical'}, {'scalar'}, ...
-            'fitStaticLandscape', 'useGPU');
+            'fitStaticLandscapeWithOrbits', 'useGPU');
     end
 
     if strcmpi(varargin{i}, 'Verbose')
         verbose = varargin{i+1};
         validateattributes(verbose, {'logical'}, {'scalar'}, ...
-            'fitStaticLandscape', 'verbose');
+            'fitStaticLandscapeWithOrbits', 'verbose');
     end
 
 end
@@ -700,7 +960,11 @@ if useGPU, try gpuDevice; catch, useGPU = false; end; end
 %--------------------------------------------------------------------------
 
 if ~any(isSaddle), enforceSaddles = false; end
-numConstHeights = sum(~isnan(constFixHeights));
+% numConstHeights = sum(~isnan(constFixHeights));
+% numConstLoopHeights = sum(~isnan(constLoopHeights));
+% numConstLoopSpeeds = sum(~isnan(constLoopSpeeds));
+constHeightsAndSpeeds = [constFixHeights; constLoopHeights; constLoopSpeeds];
+numConstHeightsAndSpeeds = sum(~isnan(constHeightsAndSpeeds));
 
 if strcmpi(simTimeHandling, 'constant')
     assert(strcmpi(errorType, 'symKLD'), ['Constant simulation time ' ...
@@ -709,35 +973,60 @@ if strcmpi(simTimeHandling, 'constant')
 end
 
 % Process the supplied initial guess --------------------------------------
-if ~isempty(initGuess)
+if isempty(initGuess)
+   
+    initGuess = [zeros(numFixPoints+numLoops, 1); 1; 1];
 
-    assert(numel(initGuess) == (numFixPoints+2), ...
-        'Initial guess is improperly sized');
-
-    if ~isempty(constD)
-        initGuess(end-1) = constD;
-    end
-    assert(initGuess(end-1) > 0, ['Diffusion coefficient ' ...
-        'must be positive in the initial guess']);
-
-    if ~isempty(constScalarMetric)
-        initGuess(end) = constScalarMetric;
-    end
-    assert(initGuess(end) > 0, ['Scalar metric ' ...
-        'must be positive in the initial guess']);
-
-    if (numConstHeights > 0)
-        initGuess(~isnan(constFixHeights)) = ...
-            constFixHeights(~isnan(constFixHeights));
-    end
-
+    % Ensure the constant height sum constraint is observed if constrained
+    % heights are supplied
     if ~isempty(constHeightSum)
-        assert(abs(sum(initGuess(1:numFixPoints))-constHeightSum) < 1e-12, ...
-            ['User supplied initial guess does not adhere to the ' ...
-            'fixed point height sum constraint']);
+
+        % Unconstrained values are NaN
+        tmpHeightVals = [constFixHeights; constLoopHeights];
+        tmpFreeIDx = isnan(tmpHeightVals);
+        tmpFixedSum = sum(tmpHeightVals(~tmpFreeIDx));
+
+        assert(any(tmpFreeIDx) || abs(tmpFixedSum - constHeightSum) < 1e-12, ...
+            ['Fixed heights are inconsistent with the supplied ' ...
+            'ConstHeightSum constraint']);
+
+        tmpHeightVals(tmpFreeIDx) = ...
+            (constHeightSum - tmpFixedSum) ./ sum(tmpFreeIDx);
+
+        initGuess(1:numFixPoints) = tmpHeightVals;
+
+        clear tmpHeightVals tmpFreeIDx tmpFixedSum
+
     end
 
 end
+
+assert(numel(initGuess) == (numFixPoints+numLoops+2), ...
+    'Initial guess is improperly sized');
+
+if ~isempty(constD)
+    initGuess(end-1) = constD;
+end
+assert(initGuess(end-1) > 0, ['Diffusion coefficient ' ...
+    'must be positive in the initial guess']);
+
+if ~isempty(constScalarMetric)
+    initGuess(end) = constScalarMetric;
+end
+assert(initGuess(end) > 0, ['Scalar metric ' ...
+    'must be positive in the initial guess']);
+
+if (numConstHeightsAndSpeeds > 0)
+    tmpIDx = find(~isnan(constHeightsAndSpeeds));
+    initGuess(tmpIDx) = constHeightsAndSpeeds(tmpIDx);
+end
+
+if ~isempty(constHeightSum)
+    assert(abs(sum(initGuess(1:numFixPoints))-constHeightSum) < 1e-12, ...
+        ['User supplied initial guess does not adhere to the ' ...
+        'fixed point/loop height sum constraint']);
+end
+
 
 % Estimate point set pseudo potential from point cloud---------------------
 if isempty(U0)
@@ -867,6 +1156,9 @@ end
 % MANIFOLD/POINT SET/POTENTIAL OPTION PROCESSING
 %--------------------------------------------------------------------------
 
+% Intrinsic dimension is ambient dimension by default
+if isempty(intDim), intDim = dim; end
+
 % Compute point cloud volume element --------------------------------------
 
 if verbose
@@ -937,6 +1229,106 @@ end
 
 if normalizeMassMatrix, M = M ./ max(abs(diag(M))); end
 
+% Check connection Laplacian/mass matrix/point cloud tangent space --------
+
+if strcmpi(rotMethod, 'bilaplacian-flat') || (numLoops == 0)
+
+    Lconn = [];
+    Mconn = [];
+    allBases = {};
+    % allPTMaps = {};
+
+elseif strcmpi(rotMethod, 'bilaplacian')
+    assert(intDim < dim, ['It is severely wasteful to use a full ' ...
+        'connection Laplacian on a flat manifold'])
+
+    if removeOutliers
+        warning('Outlier removal is NOT geometry aware for non-flat problems');
+    end
+
+    % Validate point cloud tangent space
+    if (isempty(allBases) || isempty(allPTMaps))
+        assert(isempty(Lconn) && isempty(Mconn), ['If you are supplying' ...
+            'a connection Laplacian/mass matrix, you must also supply ' ...
+            'the corresponding tangent bases and parallel transport maps']);
+
+        if verbose, fprintf('Building point cloud tangent space... '); end
+        [allBases, allPTMaps] = buildPointCloudTangentSpace( ...
+            X, intDim, 18, 'knn', false);
+        if verbose, fprintf('Done\n'); end
+
+    else
+
+        % It is up to the user to ensure that the basis vectors are
+        % orthonormal
+        validateattributes(allBases, {'cell'}, ...
+            {'vector', 'numel', numPoints}, ...
+            'fitStaticLandscapeWithOrbits', 'allBases');
+        cellfun(@(x) validateattributes(x, {'numeric'}, ...
+            {'2d', 'finite', 'real', 'nrows', dim, 'ncols', intDim}, ...
+            'fitStaticLandscapeWithOrbits', 'allBases'), allBases, ...
+            'Uni', false);
+
+        % It is up to the user to determine if the appropriate entries are
+        % proper orthogonal transformations
+        validateattributes(allPTMaps, {'cell'}, ...
+            {'2d', 'nrows', numPoints, 'ncols', numPoints}, ...
+            'fitStaticLandscapeWithOrbits', 'allBases');
+
+    end
+
+    % Validate connection Laplacian and mass matrix
+    if (isempty(Lconn) || isempty(Mconn))
+        
+        if verbose, fprintf('Building connection Laplacian/mass matrix... '); end
+        [Lconn, Mconn] = connectionLaplacian(allPTMaps, L, M, true, false);
+        if verbose, fprintf('Done\n'); end
+
+    else
+
+        validateattributes(Lconn, {'numeric'}, {'2d', 'finite', 'real', ...
+            'ncols', intDim * numPoints, 'nrows', intDim * numPoints});
+        assert(issymmetric(Lconn), 'Connection Laplacian is not symmetric');
+
+        % Check for positive-definiteness
+        [~, isPD] = chol(Lconn); isPD = isPD == 0;
+        if ~isPD
+            [~, isPD] = chol(-Lconn); isPD = isPD == 0;
+            if isPD
+                Lconn = -Lconn;
+            else
+                error('Connection Laplacian is neither positive nor negative definite');
+            end
+        end
+
+        validateattributes(Mconn, {'numeric'}, {'2d', 'finite', 'real', ...
+            'ncols', intDim * numPoints, 'nrows', intDim * numPoints});
+        assert(isdiag(Mconn), 'Connection mass matrix is not diagonal');
+        assert(all(diag(Mconn) > 0), 'Connection mass matrix contains non-positive masses');
+
+        clear isPD
+
+    end
+
+
+
+else
+
+    error('Invalid rotation problem type supplied');
+
+end
+
+clear allPTMaps
+
+% Compute loop tangent vectors, necessary ---------------------------------
+if isempty(allLoopTangentVectors)
+    if verbose, fprintf('Building loop tangent vectors... '); end
+    allLoopTangentVectors = cellfun(@(x) ...
+        computePathTangentVectors(X, x, loopSmoothIters, true), ...
+        allLoops, 'Uni', false);
+    if verbose, fprintf('Done\n'); end
+end
+
 % Build quadratic coefficients --------------------------------------------
 % We explicitly build the biharmonic operator here.
 % 'interpolatePotentialKHarmonic' would have more flexibility but is
@@ -947,20 +1339,47 @@ if ~issymmetric(Q), Q = (Q + Q.') ./ 2; end % Correct for roundoff error
 if (regSigma > 0), Q = Q + regSigma .* eye(size(Q)); end
 clear L M
 
+if (isempty(Lconn) || isempty(Mconn))
+    Qconn = [];
+else
+    Qconn = Lconn * (Mconn \ Lconn);
+    if ~issymmetric(Qconn)
+        Qconn = (Qconn + Qconn.') ./ 2; % Correct for roundoff error
+    end
+    if (regSigma > 0)
+        Qconn = Qconn + regSigma .* eye(size(Qconn));
+    end
+end
+clear Lconn Mconn
+
+if isempty(Qconn)
+    knownLoopIDx = [];
+else
+    knownLoopIDx = allLoopIDx + numPoints * (0:(intDim-1));
+    knownLoopIDx = knownLoopIDx(:);
+end
+
 % Pre-compute quadratic solver information for constructing the
 % interpolated potential
 if precomputeQuadProg
 
     fprintf('Pre-computing quadratic solver info\n')
-    [~, tmpKnownIDx] = interpolateValuesAlongPath( ones(numPaths, 2), ...
+    [~, tmpKnownIDx] = interpolateValuesAlongPath(ones(numPaths, 2), ...
         allPaths, 'PathLengths', allPathLengths, ...
         'InterpolationMethod', pathInterpMethod, ...
         'CollisionMethod', pathCollisionMethod);
+    tmpKnownIDx = unique([tmpKnownIDx; allLoopIDx], 'stable');
     F = min_quad_with_fixed_precompute(Q, tmpKnownIDx, []);
+
+    if isempty(Qconn)
+        Frot = min_quad_with_fixed_precompute(Q, allLoopIDx, []);
+    else
+        Frot = min_quad_with_fixed_precompute(Qconn, knownLoopIDx, []);
+    end
 
 else
 
-    F = [];
+    F = []; Frot = [];
 
 end
 
@@ -989,11 +1408,11 @@ if enforceSaddles
 
     A = fixInPathIDx(any(saddleInPath, 2), :);
     A(~saddleInPath(any(saddleInPath, 2), 1), :) = ...
-        A(~saddleInPath(any(saddleInPath, 2),1), [2 1]);
+        A(~saddleInPath(any(saddleInPath, 2), 1), [2 1]);
 
     A = full(sparse( repmat((1:size(A,1)).', [1 2]), A, ...
         [-ones(size(A,1), 1), ones(size(A,1), 1)], ...
-        size(A,1), numFixPoints+2 ));
+        size(A,1), numFixPoints+numLoops+2 ));
 
     b = -1e-12 * ones(size(A,1), 1);
 
@@ -1007,19 +1426,20 @@ if ~isempty(constHeightSum)
 
     if verbose, disp('Adding height sum constraint'); end
 
-    Aeq = [Aeq; ones(1, numFixPoints) 0 0];
+    Aeq = [Aeq; ones(1, numFixPoints), zeros(1, numLoops), 0, 0];
     beq = [beq; constHeightSum];
 
 end
 
-if (numConstHeights > 0)
+if (numConstHeightsAndSpeeds > 0)
 
-    if verbose, disp('Adding fixed height constraint'); end
+    if verbose, disp('Adding fixed height/speed constraints'); end
 
     Aeq = [Aeq; ...
-        full(sparse(1:numConstHeights, find(~isnan(constFixHeights)), ...
-        1, numConstHeights, numFixPoints+2))];
-    beq = [beq; reshape(constFixHeights(~isnan(constFixHeights)), [], 1)];
+        full(sparse(1:numConstHeightsAndSpeeds, ...
+        find(~isnan(constHeightsAndSpeeds)), ...
+        1, numConstHeightsAndSpeeds, numFixPoints+numLoops+2))];
+    beq = [beq; reshape(constHeightsAndSpeeds(~isnan(constHeightsAndSpeeds)), [], 1)];
 
 end
 
@@ -1031,7 +1451,8 @@ if ~isempty(constD)
     % already fixed
     enforcePositiveDiffusion = false;
 
-    Aeq = [Aeq; full(sparse(1, numFixPoints+1, 1, 1, numFixPoints+2))];
+    Aeq = [Aeq; full(sparse(1, numFixPoints+numLoops+1, 1, 1, ...
+        numFixPoints+numLoops+2))];
     beq = [beq; constD];
 
 end
@@ -1043,7 +1464,8 @@ if ~isempty(constScalarMetric)
     % There is no need to enforce a positive metric if it is already fixed
     enforcePositiveMetric = false;
 
-    Aeq = [Aeq; full(sparse(1, numFixPoints+2, 1, 1, numFixPoints+2))];
+    Aeq = [Aeq; full(sparse(1, numFixPoints+numLoops+2, 1, 1, ...
+        numFixPoints+numLoops+2))];
     beq = [beq; constScalarMetric];
 
 end
@@ -1052,7 +1474,7 @@ end
 
 if isempty(lowerBounds)
 
-    lb = -inf(numFixPoints+2, 1);
+    lb = -inf(numFixPoints+numLoops+2, 1);
 
     if enforcePositiveDiffusion
         if verbose, disp('Enforcing positive diffusion'); end
@@ -1081,20 +1503,20 @@ else
 end
 
 if isempty(upperBounds)
-    ub = inf(numFixPoints+2, 1);
+    ub = inf(numFixPoints+numLoops+2, 1);
 else
     ub = upperBounds;
 end
 
 % Determine if unconstrained minimization is feasible ---------------------
 
-constrainedValues = nan(numFixPoints+2, 1);
+constrainedValues = nan(numFixPoints+numLoops+2, 1);
 runConstrainedMinimization = true;
 if ( ~enforceSaddles && ~enforcePositiveDiffusion && ~enforcePositiveMetric ...
         && isempty(constHeightSum) && all(isinf(lb)) && all(isinf(ub)) )
 
     runConstrainedMinimization = false;
-    constrainedValues(1:numFixPoints) = constFixHeights;
+    constrainedValues(1:(numFixPoints+numLoops)) = constHeightsAndSpeeds;
 
     if ~isempty(constD)
         constrainedValues(end-1) = constD;
@@ -1160,8 +1582,10 @@ optConstrainedValues = constrainedValues;
 optConstrainedValues(isnan(constrainedValues)) = optVals;
 
 optFixHeights = optConstrainedValues(1:numFixPoints);
-optD = optConstrainedValues(numFixPoints+1);
-optScalarMetric = optConstrainedValues(numFixPoints+2);
+optLoopHeights = optConstrainedValues(numNonLoopFixPoints + (1:numLoops));
+optLoopSpeeds = optConstrainedValues(numNonLoopFixPoints + numLoops + (1:numLoops));
+optD = optConstrainedValues(numFixPoints+numLoops+1);
+optScalarMetric = optConstrainedValues(numFixPoints+numLoops+2);
 
 %--------------------------------------------------------------------------
 % FORMAT OUTPUT
@@ -1175,14 +1599,11 @@ optEndPointVals = optFixHeights(fixInPathIDx);
     allPaths, 'PathLengths', allPathLengths, ...
     'InterpolationMethod', pathInterpMethod, ...
     'CollisionMethod', pathCollisionMethod);
-
-% Compute interpolated potential (OLD)
-% optUI = interpolatePotentialKHarmonic(X, optKnownU, optKnownIDx, ...
-%     2, 'TikhonovRegularization', regSigma, 'RemoveOutliers', ...
-%     removeOutliers, 'OutlierThreshold', outlierThreshold, ...
-%     'OutlierNeighbors', outlierNNSize, 'Laplacian', L, ...
-%     'MassMatrix', M, 'TimeStep', dt, ...
-%     'NormalizeMassMatrix', normalizeMassMatrix);
+optLoopU = cellfun(@(x, y)  x .* ones(numel(y), 1), ...
+    num2cell(reshape(optLoopHeights, [], 1)), allLoops, 'Uni', false);
+optKnownU = [optKnownU; vertcat(optLoopU{:})];
+[optKnownIDx, optUniqueIDx, ~] = unique([optKnownIDx; allLoopIDx], 'stable');
+optKnownU = optKnownU(optUniqueIDx);
 
 % Compute interpolated potential (FAST)
 optUI = min_quad_with_fixed(Q, zeros(numPoints, 1), ...
@@ -1202,10 +1623,73 @@ end
 
 optU = UB + optUI; % Combine to compute dynamical potential
 
+% Loop velocities are just speeds times tangent vectors
+optLoopVelocities = cellfun(@(x, y)  x .* y, ...
+    num2cell(reshape(optLoopSpeeds, [], 1)), allLoopTangentVectors, ...
+    'Uni', false);
+optLoopVelocities = vertcat(optLoopVelocities{:});
+
+if strcmpi(rotMethod, 'bilaplacian-flat')
+
+    % We solve a separate scalar problem for each ambient dimension
+    optRotV = zeros(size(X));
+    for dd = 1:dim
+        optRotV(:,dd) = min_quad_with_fixed(Q, zeros(numPoints, 1), ...
+            allLoopIDx, optLoopVelocities(:,dd), [], [], Frot);
+    end
+
+elseif strcmpi(rotMethod, 'bilaplacian')
+
+    % Loop velocities must be projected onto local tangent spaces
+    optLoopVelocities = mat2cell(optLoopVelocities, ...
+        ones(1, numel(allLoopIDx)), dim);
+    optLoopVelocities = cellfun(@(x, y) x * y, optLoopVelocities, ...
+        allBases(allLoopIDx), 'Uni', false);
+    optLoopVelocities = vertcat(optLoopVelocities{:});
+
+    % We solve a single intrinsic problem
+    optRotV = min_quad_with_fixed(Qconn, zeros(intDim * numPoints, 1), ...
+        knownLoopIDx, optLoopVelocities(:), [], [], Frot);
+    optRotV = reshape(optRotV, numPoints, intDim);
+
+    % We lift both the loop velocities and the full velocites back
+    % into the ambient dimensional space
+    optLoopVelocities = mat2cell(optLoopVelocities, ...
+        ones(1, numel(allLoopIDx)), intDim);
+    optLoopVelocities = cellfun(@(x, y) x * y.', optLoopVelocities, ...
+        allBases(allLoopIDx), 'Uni', false);
+    optLoopVelocities = vertcat(optLoopVelocities{:});
+
+    optRotV = mat2cell(optRotV, ones(1, numPoints), intDim);
+    optRotV = cellfun(@(x, y) x * y.', optRotV, allBases, 'Uni', false);
+    optRotV = vertcat(optRotV{:});
+
+else
+
+    error('Invalid rotation problem type supplied');
+
+end
+
+% Handle interpolated velocity outliers. NOTE: This is NOT geometry
+% aware for non-flat problems
+if removeOutliers
+    for dd = 1:dim
+        if isempty(rotOutlierThreshold)
+            optOutlierThreshold = [min(optLoopVelocities(:,dd)), ...
+                max(optLoopVelocities(:,dd))] + ...
+                1e-14 * [-1 1];
+        else
+            optOutlierThreshold = rotOutlierThreshold;
+        end
+        optRotV(:,dd) = removeScalarOutliersFromPointCloud( ...
+            X, optRotV(:,dd), optOutlierThreshold, outlierNNSize);
+    end
+end
+
 optT = computeTransitionMatrix(X, optU, dt, ...
     'PointPotential', U0, 'ScalarMetric', optScalarMetric, ...
     'DiffusionCoefficient', optD, 'PointDiffusionCoefficient', D0, ...
-    'ClipThreshold', clipThreshold, ...
+    'ClipThreshold', clipThreshold, 'VectorField', optRotV, ...
     'StrictNormalization', strictNormalization, ...
     'VolumeElementType', volumeType, 'VolumeElement', volumeElement);
 
@@ -1265,6 +1749,8 @@ else
 
 end
 
+optFixHeights = optConstrainedValues(1:numNonLoopFixPoints);
+
 if verbose, fprintf('Done\n'); end
 
 %**************************************************************************
@@ -1281,6 +1767,10 @@ if verbose, fprintf('Done\n'); end
         D = locConstrainedValues(end-1);
         scalarMetric = locConstrainedValues(end);
         fixHeights = locConstrainedValues(1:numFixPoints);
+        loopHeights = locConstrainedValues(numNonLoopFixPoints + (1:numLoops));
+        loopHeights = loopHeights(:);
+        loopSpeeds = locConstrainedValues(numFixPoints + (1:numLoops));
+        loopSpeeds = loopSpeeds(:);
 
         % Convert fixed point height list into path end point values
         endPointVals = fixHeights(fixInPathIDx);
@@ -1288,14 +1778,11 @@ if verbose, fprintf('Done\n'); end
             allPaths, 'PathLengths', allPathLengths, ...
             'InterpolationMethod', pathInterpMethod, ...
             'CollisionMethod', pathCollisionMethod);
-
-        % Compute interpolated potential (OLD)
-        % UI = interpolatePotentialKHarmonic(X, knownU, knownIDx, ...
-        %     2, 'TikhonovRegularization', regSigma, 'RemoveOutliers', ...
-        %     removeOutliers, 'OutlierThreshold', outlierThreshold, ...
-        %     'OutlierNeighbors', outlierNNSize, 'Laplacian', L, ...
-        %     'MassMatrix', M, 'TimeStep', dt, ...
-        %     'NormalizeMassMatrix', normalizeMassMatrix);
+        loopU = cellfun(@(x, y)  x .* ones(numel(y), 1), ...
+            num2cell(loopHeights), allLoops, 'Uni', false);
+        knownU = [knownU; vertcat(loopU{:})];
+        [knownIDx, uniqueIDx, ~] = unique([knownIDx; allLoopIDx], 'stable');
+        knownU = knownU(uniqueIDx);
 
         % Compute interpolated potential (FAST)
         UI = min_quad_with_fixed(Q, zeros(numPoints, 1), ...
@@ -1315,13 +1802,77 @@ if verbose, fprintf('Done\n'); end
 
         U = UB + UI; % Combine to compute dynamical potential
 
+        % Loop velocities are just speeds times tangent vectors
+        loopVelocities = cellfun(@(x, y)  x .* y, ...
+            num2cell(loopSpeeds), allLoopTangentVectors, ...
+            'Uni', false);
+        loopVelocities = vertcat(loopVelocities{:});
+
+        if strcmpi(rotMethod, 'bilaplacian-flat')
+
+            % We solve a separate scalar problem for each ambient dimension
+            rotV = zeros(size(X));
+            for d = 1:dim
+                rotV(:,d) = min_quad_with_fixed(Q, zeros(numPoints, 1), ...
+                    allLoopIDx, loopVelocities(:,d), [], [], Frot);
+            end
+
+        elseif strcmpi(rotMethod, 'bilaplacian')
+
+            % Loop velocities must be projected onto local tangent spaces
+            loopVelocities = mat2cell(loopVelocities, ...
+                ones(1, numel(allLoopIDx)), dim);
+            loopVelocities = cellfun(@(x, y) x * y, loopVelocities, ...
+                allBases(allLoopIDx), 'Uni', false);
+            loopVelocities = vertcat(loopVelocities{:});
+
+            % We solve a single intrinsic problem
+            rotV = min_quad_with_fixed(Qconn, zeros(intDim * numPoints, 1), ...
+                knownLoopIDx, loopVelocities(:), [], [], Frot);
+            rotV = reshape(rotV, numPoints, intDim);
+
+            % We lift both the loop velocities and the full velocites back
+            % into the ambient dimensional space
+            loopVelocities = mat2cell(loopVelocities, ...
+                ones(1, numel(allLoopIDx)), intDim);
+            loopVelocities = cellfun(@(x, y) x * y.', loopVelocities, ...
+                allBases(allLoopIDx), 'Uni', false);
+            loopVelocities = vertcat(loopVelocities{:});
+
+            rotV = mat2cell(rotV, ones(1, numPoints), intDim);
+            rotV = cellfun(@(x, y) x * y.', rotV, allBases, 'Uni', false);
+            rotV = vertcat(rotV{:});
+
+        else
+
+            error('Invalid rotation problem type supplied');
+
+        end
+
+        % Handle interpolated velocity outliers. NOTE: This is NOT geometry
+        % aware for non-flat problems
+        if removeOutliers
+            for d = 1:dim
+                if isempty(rotOutlierThreshold)
+                    curOutlierThreshold = [min(loopVelocities(:,d)), ...
+                        max(loopVelocities(:,d))] + ...
+                        1e-14 * [-1 1];
+                else
+                    curOutlierThreshold = rotOutlierThreshold;
+                end
+                rotV(:,d) = removeScalarOutliersFromPointCloud( ...
+                    X, rotV(:,d), curOutlierThreshold, outlierNNSize);
+            end
+        end
+
         T = computeTransitionMatrix(X, U, dt, ...
             'PointPotential', U0, 'ScalarMetric', scalarMetric, ...
             'DiffusionCoefficient', D, 'PointDiffusionCoefficient', D0, ...
             'ClipThreshold', clipThreshold, ...
             'StrictNormalization', strictNormalization, ...
             'VolumeElementType', volumeType, ...
-            'VolumeElement', volumeElement);
+            'VolumeElement', volumeElement, ...
+            'VectorField', rotV, 'useGPU', useGPU);
 
         % NOTE: We perform this operation serially so that gradients can be
         % estimated in parallel, if desired
@@ -1384,6 +1935,10 @@ if verbose, fprintf('Done\n'); end
         D = locConstrainedValues(end-1);
         scalarMetric = locConstrainedValues(end);
         fixHeights = locConstrainedValues(1:numFixPoints);
+        loopHeights = locConstrainedValues(numNonLoopFixPoints + (1:numLoops));
+        loopHeights = loopHeights(:);
+        loopSpeeds = locConstrainedValues(numFixPoints + (1:numLoops));
+        loopSpeeds = loopSpeeds(:);
 
         % Convert fixed point height list into path end point values
         endPointVals = fixHeights(fixInPathIDx);
@@ -1391,14 +1946,11 @@ if verbose, fprintf('Done\n'); end
             allPaths, 'PathLengths', allPathLengths, ...
             'InterpolationMethod', pathInterpMethod, ...
             'CollisionMethod', pathCollisionMethod);
-
-        % Compute interpolated potential (OLD)
-        % UI = interpolatePotentialKHarmonic(X, knownU, knownIDx, ...
-        %     2, 'TikhonovRegularization', regSigma, 'RemoveOutliers', ...
-        %     removeOutliers, 'OutlierThreshold', outlierThreshold, ...
-        %     'OutlierNeighbors', outlierNNSize, 'Laplacian', L, ...
-        %     'MassMatrix', M, 'TimeStep', dt, ...
-        %     'NormalizeMassMatrix', normalizeMassMatrix);
+        loopU = cellfun(@(x, y)  x .* ones(numel(y), 1), ...
+            num2cell(loopHeights), allLoops, 'Uni', false);
+        knownU = [knownU; vertcat(loopU{:})];
+        [knownIDx, uniqueIDx, ~] = unique([knownIDx; allLoopIDx], 'stable');
+        knownU = knownU(uniqueIDx);
 
         % Compute interpolated potential (FAST)
         UI = min_quad_with_fixed(Q, zeros(numPoints, 1), ...
@@ -1418,13 +1970,77 @@ if verbose, fprintf('Done\n'); end
 
         U = UB + UI; % Combine to compute dynamical potential
 
+        % Loop velocities are just speeds times tangent vectors
+        loopVelocities = cellfun(@(x, y)  x .* y, ...
+            num2cell(loopSpeeds), allLoopTangentVectors, ...
+            'Uni', false);
+        loopVelocities = vertcat(loopVelocities{:});
+
+        if strcmpi(rotMethod, 'bilaplacian-flat')
+
+            % We solve a separate scalar problem for each ambient dimension
+            rotV = zeros(size(X));
+            for d = 1:dim
+                rotV(:,d) = min_quad_with_fixed(Q, zeros(numPoints, 1), ...
+                    allLoopIDx, loopVelocities(:,d), [], [], Frot);
+            end
+
+        elseif strcmpi(rotMethod, 'bilaplacian')
+
+            % Loop velocities must be projected onto local tangent spaces
+            loopVelocities = mat2cell(loopVelocities, ...
+                ones(1, numel(allLoopIDx)), dim);
+            loopVelocities = cellfun(@(x, y) x * y, loopVelocities, ...
+                allBases(allLoopIDx), 'Uni', false);
+            loopVelocities = vertcat(loopVelocities{:});
+
+            % We solve a single intrinsic problem
+            rotV = min_quad_with_fixed(Qconn, zeros(intDim * numPoints, 1), ...
+                knownLoopIDx, loopVelocities(:), [], [], Frot);
+            rotV = reshape(rotV, numPoints, intDim);
+
+            % We lift both the loop velocities and the full velocites back
+            % into the ambient dimensional space
+            loopVelocities = mat2cell(loopVelocities, ...
+                ones(1, numel(allLoopIDx)), intDim);
+            loopVelocities = cellfun(@(x, y) x * y.', loopVelocities, ...
+                allBases(allLoopIDx), 'Uni', false);
+            loopVelocities = vertcat(loopVelocities{:});
+
+            rotV = mat2cell(rotV, ones(1, numPoints), intDim);
+            rotV = cellfun(@(x, y) x * y.', rotV, allBases, 'Uni', false);
+            rotV = vertcat(rotV{:});
+
+        else
+
+            error('Invalid rotation problem type supplied');
+
+        end
+
+        % Handle interpolated velocity outliers. NOTE: This is NOT geometry
+        % aware for non-flat problems
+        if removeOutliers
+            for d = 1:dim
+                if isempty(rotOutlierThreshold)
+                    curOutlierThreshold = [min(loopVelocities(:,d)), ...
+                        max(loopVelocities(:,d))] + ...
+                        1e-14 * [-1 1];
+                else
+                    curOutlierThreshold = rotOutlierThreshold;
+                end
+                rotV(:,d) = removeScalarOutliersFromPointCloud( ...
+                    X, rotV(:,d), curOutlierThreshold, outlierNNSize);
+            end
+        end
+
         T = computeTransitionMatrix(X, U, dt, ...
             'PointPotential', U0, 'ScalarMetric', scalarMetric, ...
             'DiffusionCoefficient', D, 'PointDiffusionCoefficient', D0, ...
             'ClipThreshold', clipThreshold, ...
             'StrictNormalization', strictNormalization, ...
             'VolumeElementType', volumeType, ...
-            'VolumeElement', volumeElement);
+            'VolumeElement', volumeElement, ...
+            'VectorField', rotV, 'useGPU', useGPU);
 
         simProb = cell(numDataSets, 1);
         for k = 1:numDataSets
@@ -1440,6 +2056,7 @@ if verbose, fprintf('Done\n'); end
     end
 
 end
+
 
 function err = computeSimulationError(measProb, simProb, errorType, X)
 %COMPUTESIMULATIONERROR A helper function that computes the error between
@@ -1531,3 +2148,29 @@ else
 end
 
 end
+
+
+% % UNUSED RIGHT NOW: KEEP IN CASE WE WANT TO RELAX LAPLACIAN POSITIVE
+% % DEFINITENESS CONSTRAINT LATER
+% function [A, signFlip] = orientSymmetricSemidefinite(A, matrixName)
+% %ORIENTSYMMETRICSEMIDEFINITE Checks whether a symmetric matrix is positive
+% %or negative semi-definite. If negative semi-definite, this function
+% %returns a flipped positive semi-definite version
+% 
+% eigTol = 1e-10 * max(1, norm(A, 'fro'));
+% 
+% ev = eig(full((A + A.') ./ 2));
+% 
+% isPSD = all(ev >= -eigTol);
+% isNSD = all(ev <= eigTol);
+% 
+% assert(isPSD || isNSD, ...
+%     '%s is neither positive nor negative semidefinite', matrixName);
+% 
+% signFlip = false;
+% if isNSD
+%     A = -A;
+%     signFlip = true;
+% end
+% 
+% end
