@@ -50,7 +50,10 @@ function [T, volumeElement] = computeTransitionMatrix(X, U, dt, varargin)
 %       cell j.
 %
 %       - ('UseGPU', useGPU = true): Whether or not to perform computations
-%       on a GPU
+%       on a GPU.
+%
+%       - ('KeepGPU', keepGPU = false): Whether to keep the output on the
+%       GPU or gather back to CPU.
 %
 %       - ('VolumeElementType', volumeType = 'graphLaplacian'): The type of
 %       volume element used to ensure the transition matrix operates on
@@ -116,6 +119,7 @@ strictNormalization = true;
 distMatrix = [];
 precompT = [];
 useGPU = true;
+keepGPU = false;
 volumeType = 'graphlaplacian';
 volumeElement = [];
 vecField = [];
@@ -126,7 +130,7 @@ supportedOptions = {'PointPotential', 'ScalarMetric', ...
     'DiffusionCoefficient', 'PointDiffusionCoefficient', ...
     'ClipThreshold', 'StrictNormalization', 'DistanceMatrix', ...
     'UseGPU', 'VolumeElementType', 'VolumeElement', 'PrecomputeBaseT', ...
-    'VectorField'};
+    'VectorField', 'KeepGPU'};
 checkSupportedOptions(supportedOptions, varargin);
 
 for i = 1:length(varargin)
@@ -187,6 +191,12 @@ for i = 1:length(varargin)
         useGPU = varargin{i+1};
         validateattributes(useGPU, {'logical'}, {'scalar'}, ...
             'computeTransitionMatrix', 'useGPU');
+    end
+
+    if strcmpi(varargin{i}, 'KeepGPU')
+        keepGPU = varargin{i+1};
+        validateattributes(keepGPU, {'logical'}, {'scalar'}, ...
+            'computeTransitionMatrix', 'keepGPU');
     end
 
     if strcmpi(varargin{i}, 'VolumeElementType')
@@ -404,6 +414,6 @@ end
 
 assert(~any(T(:) < 0), 'Negative transition probabilities on output');
 
-T = gather(T);
+if (useGPU && ~keepGPU), T = gather(T); end
     
 end
