@@ -20,7 +20,7 @@ function [allBases, allPTMaps] = buildPointCloudTangentSpace( ...
 %projected onto the tangent space (i.e. a #P x dim matrix) in the
 %following way:
 %
-%   tanV = mat2cell(V, ones(1, ambiDim), ambiDim);
+%   tanV = mat2cell(V, ones(1, size(V,1)), ambiDim);
 %   tanV = cellfun(@(x,y) x * y, tanV, allBases, 'Uni', false);
 %   tanV = vertcat(tanV{:});
 %
