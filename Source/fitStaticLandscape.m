@@ -250,7 +250,7 @@ function [optErr, optFixHeights, optD, optScalarMetric, ...
 %
 %   OUTPUT PARAMETERS:
 %
-%       - optKLDErr:        The average K-L divergence error between the
+%       - optErr:        The average K-L divergence error between the
 %                           optimized simulated time courses and their
 %                           corresponding data sets
 %
@@ -301,6 +301,8 @@ cellfun(@(x) validateattributes(x, {'numeric'}, {'vector', 'integer', ...
     allPaths, 'Uni', false);
 assert(all(cellfun(@(x) numel(x) > 1, allPaths, 'Uni', true)), ...
     'Paths must have at least two points');
+allPaths = cellfun(@(x) x(:), allPaths, 'Uni', false);
+allPaths = allPaths(:);
 
 % fixPointIDx: The unique set of indices in 'X' corresponding to
 % minima/saddles
@@ -608,8 +610,8 @@ for i = 1:length(varargin)
 
     if strcmpi(varargin{i}, 'OutlierThreshold')
         outlierThreshold = varargin{i+1};
-        if ~isempty(outlierThrehsold)
-            validateattribtues(outlierThreshold, {'numeric'}, ...
+        if ~isempty(outlierThreshold)
+            validateattributes(outlierThreshold, {'numeric'}, ...
                 {'vector', 'numel', 2, 'finite', 'real'}, ...
                 'fitStaticLandscape', 'outlierThreshold');
             assert(outlierThreshold(2) > outlierThreshold(1), ...
@@ -621,8 +623,8 @@ for i = 1:length(varargin)
     if strcmpi(varargin{i}, 'OutlierNeighbors')
         outlierNNSize = varargin{i+1};
         validateattributes(outlierNNSize, {'numeric'}, ...
-            {'positive', 'integer', 'scalar', 'finite', 'real', ...
-            'fitStaticLandscape', 'outlierNNSize'});
+            {'positive', 'integer', 'scalar', 'finite', 'real'}, ...
+            'fitStaticLandscape', 'outlierNNSize');
     end
 
     if strcmpi(varargin{i}, 'NormalizeMassMatrix')
@@ -656,7 +658,7 @@ for i = 1:length(varargin)
 
     if strcmpi(varargin{i}, 'ClipThreshold')
         clipThreshold = varargin{i+1};
-        validateattribtues(clipThreshold, {'numeric'}, ...
+        validateattributes(clipThreshold, {'numeric'}, ...
             {'scalar', 'nonnegative', 'finite', 'real'}, ...
             'fitStaticLandscape', 'clipThreshold');
     end
@@ -715,7 +717,7 @@ if ~isempty(initGuess)
     if ~isempty(constD)
         initGuess(end-1) = constD;
     end
-    assert(initGuess(end-1), ['Diffusion coefficient ' ...
+    assert(initGuess(end-1) > 0, ['Diffusion coefficient ' ...
         'must be positive in the initial guess']);
 
     if ~isempty(constScalarMetric)
@@ -736,6 +738,14 @@ if ~isempty(initGuess)
     end
 
 end
+
+% Estimate point set pseudo potential from point cloud---------------------
+if isempty(U0)
+    if verbose, disp('Computing point set potential:'); end
+    U0 = -D0 * log(gaussianKDE(X, X, [], sqrt(2 * dt), verbose));
+end
+
+if isempty(UB), UB = U0; end
 
 % Process the data points/data times/initial conditions -------------------
 
@@ -817,7 +827,7 @@ for i = 1:numDataSets
         
         end
 
-        if (abs(sum(initConditions{i-1})) > 1e-12)
+        if (abs(sum(initConditions{i}) - 1) > 1e-12)
             warning(['Initial conditions for data set %d ' ...
                 'are not properly normalized'], i);
         end
@@ -856,14 +866,6 @@ end
 %--------------------------------------------------------------------------
 % MANIFOLD/POINT SET/POTENTIAL OPTION PROCESSING
 %--------------------------------------------------------------------------
-
-% Estimate point set pseudo potential from point cloud---------------------
-if isempty(U0)
-    if verbose, disp('Computing point set potential:'); end
-    U0 = -D0 * log(gaussianKDE(X, X, [], sqrt(2 * dt), verbose));
-end
-
-if isempty(UB), UB = U0; end
 
 % Compute point cloud volume element --------------------------------------
 
@@ -986,10 +988,11 @@ if enforceSaddles
         'Some input paths pair saddles to saddles');
 
     A = fixInPathIDx(any(saddleInPath, 2), :);
-    A(~saddleInPath(:,1), :) = A(~saddleInPath(:,1), [2 1]);
+    A(~saddleInPath(any(saddleInPath, 2), 1), :) = ...
+        A(~saddleInPath(any(saddleInPath, 2),1), [2 1]);
 
     A = full(sparse( repmat((1:size(A,1)).', [1 2]), A, ...
-        [ones(size(A,1), 1), -ones(size(A,1), 1)], ...
+        [-ones(size(A,1), 1), ones(size(A,1), 1)], ...
         size(A,1), numFixPoints+2 ));
 
     b = -1e-12 * ones(size(A,1), 1);
