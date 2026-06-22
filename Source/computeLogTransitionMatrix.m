@@ -48,7 +48,10 @@ function [logT, volumeElement] = computeLogTransitionMatrix(X, U, dt, varargin)
 %       cell j.
 %
 %       - ('UseGPU', useGPU = true): Whether or not to perform computations
-%       on a GPU
+%       on a GPU.
+%
+%       - ('KeepGPU', keepGPU = false): Whether to keep output on the GPU
+%       or gather back to CPU.
 %
 %       - ('VolumeElementType', volumeType = 'graphLaplacian'): The type of
 %       volume element used to ensure the transition matrix operates on
@@ -113,6 +116,7 @@ clipThreshold = 0;
 distMatrix = [];
 precompT = [];
 useGPU = true;
+keepGPU = false;
 volumeType = 'graphlaplacian';
 volumeElement = [];
 vecField = [];
@@ -122,7 +126,7 @@ allVolumeTypes = {'graphlaplacian', 'laplacebeltrami'};
 supportedOptions = {'PointPotential', 'ScalarMetric', ...
     'DiffusionCoefficient', 'PointDiffusionCoefficient', ...
     'ClipThreshold', 'DistanceMatrix', 'UseGPU', 'VolumeElementType', ...
-    'VolumeElement', 'PrecomputeBaseT', 'VectorField'};
+    'VolumeElement', 'PrecomputeBaseT', 'VectorField', 'KeepGPU'};
 checkSupportedOptions(supportedOptions, varargin);
 
 for i = 1:length(varargin)
@@ -177,6 +181,12 @@ for i = 1:length(varargin)
         useGPU = varargin{i+1};
         validateattributes(useGPU, {'logical'}, {'scalar'}, ...
             'computeLogTransitionMatrix', 'useGPU');
+    end
+
+    if strcmpi(varargin{i}, 'KeepGPU')
+        keepGPU = varargin{i+1};
+        validateattributes(keepGPU, {'logical'}, {'scalar'}, ...
+            'computeLogTransitionMatrix', 'keepGPU');
     end
 
     if strcmpi(varargin{i}, 'VolumeElementType')
@@ -320,16 +330,16 @@ end
 if ~isempty(volumeElement)
 
     logVol = log(volumeElement);
-    if (nargout > 1)
-        volumeElement = gather(volumeElement ./ numPoints);
-    end
+    if (nargout > 1), volumeElement = gather(volumeElement); end
 
 else
 
     if strcmpi(volumeType, 'graphlaplacian')
 
         logVol = U0 ./ D0;
-        if (nargout > 1), volumeElement = gather(exp(logVol)); end
+        if (nargout > 1)
+            volumeElement = gather(exp(logVol) ./ numPoints);
+        end
 
     elseif strcmpi(volumeType, 'laplacebeltrami')
 
@@ -367,24 +377,26 @@ logT = logVol + logT;
 nanIDx = isnan(logT(:));
 if any(nanIDx)
     warning('\nLog transition matrix contains NaN prior to normalization');
-    logT(nanIDx) = 0;
+    logT(nanIDx) = -Inf;
 end
 
 infIDx = isinf(logT(:));
 if any(infIDx)
     warning('\nLog transition matrix contains Inf prior to normalization');
-    logT(infIDx) = 0;
+    % Only replace positive infinities. -Inf correctly represents zero
+    % transition weights
+    logT(infIDx & (logT(:) > 0)) = 0;
 end
 
-if (clipThreshold > 0), logT(logT(:) < log(clipThreshold)) = 0; end
+% -Inf represents zero transition weights
+if (clipThreshold > 0), logT(logT(:) < log(clipThreshold)) = -Inf; end
 
 normLogT = logsumexp(logT, 1);
 assert(~any(isinf(normLogT) | isnan(normLogT)), ...
     'Column-wise normalization constant is Inf/NaN');
 logT = logT - normLogT;
 
-logT = gather(logT);
-
+if (useGPU && ~keepGPU), logT = gather(logT); end
 
 end
 
